@@ -189,9 +189,12 @@ export function onHook(state, input, ctx) {
   } else if (name === "PostToolUse") {
     revive(s, ctx, out);
     const cmd = commandOf(input.tool_input);
-    const pr = PR_CMD.test(cmd) ? prFrom(input.tool_response) : null;
+    const pushed = PR_CMD.test(cmd) && !failed(input.tool_response);
+    const pr = pushed ? prFrom(input.tool_response) : null;
     if (pr) s.prNumber = pr;
-    const stage = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
+    // A push or PR that failed (no remote, no auth) leaves the card where it was.
+    const guess = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
+    const stage = guess === STAGES.pr && !pushed ? null : guess;
     if (stage && stage !== s.stage && (stage === STAGES.pr || at - s.stageAt >= DWELL_MS || s.stage === STAGES.explore)) enter(s, stage, at, out);
     else if (s.stage && at - s.lastSentAt >= BEAT_MS) {
       // A heartbeat, so a long test run or CI wait never shows Stalled.

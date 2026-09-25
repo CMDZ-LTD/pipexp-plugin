@@ -35,6 +35,18 @@ test("a resend after a lost answer carries the same eventId, so the board keeps 
   assert.equal(board.requests[0].body.eventId, board.requests[1].body.eventId);
 });
 
+test("events queued while a flush is running are sent by that flush, never stranded", async () => {
+  enqueue(ev(60));
+  const seen = [];
+  await flush(async (e) => {
+    seen.push(e.eventId.slice(-2));
+    if (seen.length === 1) enqueue(ev(61)); // A hook fires mid-flush and finds the lock taken.
+    return "sent";
+  });
+  assert.deepEqual(seen, ["60", "61"]);
+  assert.equal(pending(), 0);
+});
+
 test("bounded: past MAX_FILES the oldest are dropped, and an event failing MAX_TRIES times is dropped", async () => {
   for (let i = 0; i < MAX_FILES + 5; i++) enqueue(ev(100 + i));
   assert.equal(pending(), MAX_FILES);

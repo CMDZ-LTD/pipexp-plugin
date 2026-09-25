@@ -13,7 +13,7 @@ const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
 const ASK_WAIT_S = 45;
 
 const where = {
-  cwd: { type: "string", description: "Absolute path of your working folder. Picks this session's run." },
+  cwd: { type: "string", description: "Required: the absolute path of your working folder. It picks this session's card." },
   session_id: { type: "string", description: "The session id, when you know it (CODEX_THREAD_ID). Optional." },
 };
 
@@ -82,7 +82,13 @@ const TOOLS = [
   },
 ];
 
-const sessionOf = (args) => args.session_id || currentSession(args.cwd || process.cwd(), {});
+// Every tool only reports to this person's own PipeXP board or reads status: nothing is deleted, and the only
+// system touched is that one board (a closed world). Honest annotations let Codex run them without a prompt.
+for (const tool of TOOLS) tool.annotations = { readOnlyHint: tool.name === "pipexp_status", destructiveHint: false, openWorldHint: false, idempotentHint: tool.name === "pipexp_status" };
+
+// Codex starts this server in the plugin's folder with a bare environment (no thread id, no PWD), so the
+// agent's cwd is what finds its session. The tool descriptions ask for it.
+const sessionOf = (args) => args.session_id || (args.cwd ? currentSession(args.cwd, {}) : null);
 const ok = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const err = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
@@ -102,6 +108,8 @@ async function callTool(name, args = {}) {
   }
   const id = sessionOf(args);
   if (!id) return err("No PipeXP session found for this folder. Pass cwd (your working folder) or session_id.");
+  // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
+  if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");

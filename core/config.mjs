@@ -6,6 +6,8 @@ import { homedir, hostname, platform, release } from "node:os";
 import { join } from "node:path";
 
 export const VERSION = "0.1.0";
+// PIPEXP_HOME moves everything (tests). Codex starts MCP servers with a bare environment, so the MCP server
+// always uses the default folder: keep real connections in credentials.json, not in env.
 export const home = () => process.env.PIPEXP_HOME || join(homedir(), ".config", "pipexp");
 export const stateDir = () => join(home(), "state");
 

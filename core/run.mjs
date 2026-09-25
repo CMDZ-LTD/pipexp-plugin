@@ -1,7 +1,7 @@
 // The glue every entry point shares: load a session's state, apply a hook or a report, queue the events, and
 // start one detached flush. Nothing here waits on the network.
 import { spawn } from "node:child_process";
-import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { credentials, machine, readJson, stateDir, writeJson } from "./config.mjs";
@@ -66,27 +66,44 @@ export function hook(input, runtime = runtimeOf()) {
 export function report(sessionId, rep, runtime = runtimeOf(), cwd = process.cwd()) {
   const existing = loadSession(sessionId);
   const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion);
-  const base = existing ?? onHook(null, { session_id: sessionId, cwd, hook_event_name: "none" }, ctx).state;
+  // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
+  const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
   const { state, events } = onReport(base, rep, ctx);
   commit(state, events);
   if (credentials()) kick();
   return { state, events };
 }
 
-/** The session this process belongs to: the harness's id when it gives one, else the most recent session in this folder. */
+const real = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * The session a report belongs to: the harness's id when it gives one, else the session most recently seen in
+ * this folder (or a parent of it). Folders are compared by real path: macOS /tmp is /private/tmp. A finished
+ * session still counts, so a report after the turn ended lands on the same card and brings it back.
+ */
 export function currentSession(cwd = process.cwd(), env = process.env) {
   const id = env.CODEX_THREAD_ID || env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID;
   if (id) return id;
+  const here = real(cwd);
   let best = null;
   try {
     for (const name of readdirSync(sessions())) {
       const s = readJson(join(sessions(), name));
-      if (!s || s.finished || s.shipOwned) continue;
-      if (s.cwd && cwd !== s.cwd && !cwd.startsWith(s.cwd + "/")) continue;
-      if (!best || s.lastSeenAt > best.lastSeenAt) best = s;
+      if (!s?.cwd) continue;
+      const root = real(s.cwd);
+      if (here !== root && !here.startsWith(root + "/")) continue;
+      // The deepest matching folder wins (a session in the repo beats one in a parent), then the most recent.
+      const depth = root.length;
+      if (!best || depth > best.depth || (depth === best.depth && s.lastSeenAt > best.s.lastSeenAt)) best = { s, depth };
     }
   } catch {}
-  return best?.sessionId ?? null;
+  return best?.s.sessionId ?? null;
 }
 
 // ponytail: sessions untouched for 14 days are deleted on each hook; fine at a few hundred files.

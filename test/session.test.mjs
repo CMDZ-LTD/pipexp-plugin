@@ -210,6 +210,14 @@ test("tool calls map to stages; reads and searches do not move the card", () => 
   assert.equal(stageForTool("mcp__fs__read", {}), null);
 });
 
+test("a failed push (no remote, no auth) does not move the card to Pull request", () => {
+  const { events } = play([
+    [0, { hook_event_name: "UserPromptSubmit" }],
+    [1, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "git push" }, tool_response: { exit_code: 128, output: "fatal: No configured push destination." } }],
+  ]);
+  assert.ok(!brief(events).includes("step.entered agent:S4"));
+});
+
 test("uuid5 matches Python's uuid5(NAMESPACE_URL, ...), so ids agree with the ship scripts", () => {
   // python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "run/abandoned"))'
   assert.equal(uuid5("run/abandoned"), "bd21981f-1f72-5ab1-89ef-2b75421d85c2");

@@ -82,7 +82,9 @@ export async function flush(send) {
   if (!release) return { sent: 0, left: pending(), busy: true };
   let sent = 0;
   try {
-    for (const name of names()) {
+    // Keeps going while events arrive: a hook that found this flush running left its events for it to send.
+    let stop = false;
+    for (let batch = names(); batch.length && !stop; batch = names()) for (const name of batch) {
       const path = join(outbox(), name);
       let item;
       try {
@@ -100,6 +102,7 @@ export async function flush(send) {
       item.tries = (item.tries ?? 0) + 1;
       if (item.tries >= MAX_TRIES) drop(name);
       else writeFileSync(path, JSON.stringify(item), { mode: 0o600 });
+      stop = true;
       break;
     }
   } finally {

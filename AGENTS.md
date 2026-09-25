@@ -31,3 +31,11 @@ Codex first, Claude Code next, then other harnesses. Derek (CMDZ CEO, dyslexic: 
   first lines to find sub-agents.
 - Gotcha: the local `validate_plugin.py` rejects a `hooks` key in plugin.json, so hooks load from the default `hooks/hooks.json`.
   Hook commands use `${CLAUDE_PLUGIN_ROOT}` (Codex sets it too), so one hooks.json serves both harnesses.
+- Gotcha: Codex starts the MCP server in the plugin's cache folder with a bare environment (no `PIPEXP_*`, no thread id,
+  no PWD). So the tools need the agent's `cwd` to find the session, and env overrides never reach them. To test against a
+  dev board, write `credentials.json` with `PIPEXP_URL=<dev> pipexp connect --key-stdin`; env-only setups send MCP calls to
+  whatever `credentials.json` or the legacy file says (prod).
+- Gotcha: `codex exec` runs with approvals off, so MCP tools must not need approval: `.mcp.json` sets
+  `default_tools_approval_mode: approve` and every tool carries honest MCP annotations (nothing destructive).
+- A real session end to end: `codex exec --dangerously-bypass-hook-trust -C <folder> "..."` (the flag skips the
+  /hooks trust step for that one run only).
