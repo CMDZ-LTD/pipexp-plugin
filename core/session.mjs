@@ -215,7 +215,10 @@ export function onHook(state, input, ctx) {
     if (!s.started || s.finished) return { state: s, events: [] };
     // Waiting spends no tokens: Stop already reported the turn's usage.
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
-    out.push(event(s, "run.finished", { outcome: s.prNumber ? "ready" : "abandoned", prNumber: s.prNumber }, at));
+    // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
+    // (closed, killed) is abandoned. A skill run that never reported its own finish did not complete.
+    const handedBack = s.prNumber || (!s.explicit && s.stage === STAGES.waiting);
+    out.push(event(s, "run.finished", { outcome: handedBack ? "ready" : "abandoned", prNumber: s.prNumber }, at));
     s.finished = true;
   } else {
     return { state: s, events: [] };

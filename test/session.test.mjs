@@ -77,6 +77,13 @@ test("every event the hooks make matches the board's schema fixtures (lib/plugin
   }
 });
 
+test("a session that ends after its turn is ready; one cut off mid-turn is abandoned", () => {
+  const done = play([[0, { hook_event_name: "UserPromptSubmit" }], [2, { hook_event_name: "Stop" }], [40, { hook_event_name: "SessionEnd", reason: "other" }]]);
+  assert.equal(done.events.at(-1).outcome, "ready");
+  const cut = play([[0, { hook_event_name: "UserPromptSubmit" }], [2, { hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }], [3, { hook_event_name: "SessionEnd", reason: "other" }]]);
+  assert.equal(cut.events.at(-1).outcome, "abandoned");
+});
+
 test("a quick edit-test loop moves the card at most once a minute; a PR always moves it", () => {
   const { events } = play([
     [0, { hook_event_name: "UserPromptSubmit" }],
