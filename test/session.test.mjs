@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { ctx, probe } from "./helpers.mjs";
 import { onHook, onReport, stageForTool, ticketOf, uuid5 } from "../core/session.mjs";
+import { VERSION } from "../core/config.mjs";
 
 const T0 = Date.parse("2026-09-25T10:00:00Z");
 const MIN = 60_000;
@@ -51,7 +52,7 @@ test("a plain Codex session: start, explore, build, test, PR, waiting, end", () 
   assert.equal(started.runtime, "codex");
   assert.equal(started.ticket, "ABC-12");
   assert.equal(started.title, "shop · codex/abc-12-fix-login");
-  assert.equal(started.pluginVersion, "pipexp 0.1.0");
+  assert.equal(started.pluginVersion, "pipexp " + VERSION);
   assert.equal(started.runtimeVersion, "codex 0.155.1");
   assert.equal(started.claim, "new");
   assert.equal(started.runId, uuid5("pipexp/session/" + SID));

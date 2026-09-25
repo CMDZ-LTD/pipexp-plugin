@@ -103,4 +103,9 @@ npm run validate    # Codex plugin manifest check
 ```
 
 To try local changes in Codex: `python3 ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py .`,
-then `codex plugin add pipexp@personal` and start a new session.
+then `codex plugin add pipexp@personal` and start a new session. Never commit the `+codex.<stamp>` version it writes:
+`test/version.test.mjs` fails on it.
+
+Release: bump the version in `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `package.json` and `VERSION` in
+`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.1 && git push --tags`). Installed copies
+pick it up with `codex plugin marketplace upgrade pipexp`.
