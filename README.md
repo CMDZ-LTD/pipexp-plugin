@@ -61,6 +61,23 @@ pipexp event <type> --json '{...}'
 pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]
 ```
 
+### Contract for skills (the Nudj ship skill calls these)
+
+Call `~/.config/pipexp/bin/pipexp` detached and ignore its exit code. It exits 0 unless its arguments are wrong (2); `ask` exits 3 when
+nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`, so a skill running inside a session never passes it.
+
+| When | Command |
+|---|---|
+| Claim (step 1) | `pipexp stage ship:S1 --ticket NJ-1234 --claim new` (or `resume`, `takeover`) |
+| Enter step N | `pipexp stage ship:SN [--counters '{"reviewRound":2}'] [--replay]` |
+| Displaced owner on takeover | `pipexp event run.finished --session <old task id> --lane ship --ticket NJ-1234 --json '{"outcome":"abandoned"}'` |
+| Run fields change (title, owner, tier, branch) | `pipexp event run.started --json '{"title":"...","owner":"...","tier":"standard"}'` |
+| Snag, gate, review | `pipexp event snag.reported`, `gate.checked` or `review.done` with `--json '{...}'` (the board's fields) |
+| Release | `pipexp event run.finished --json '{"outcome":"ready","prNumber":123,"stopReason":"green"}'` (usage for the last stage goes first) |
+| Ask a person | `pipexp ask "..." [--option A --option B] [--timeout-min 60]` (prints the answer) |
+
+Not installed: `[ -x ~/.config/pipexp/bin/pipexp ] || exit 0`. The path is written the first time a session starts with the plugin.
+
 ## Replaces Nudj monorepo #4823
 
 The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves into this plugin. Ticked items are built and tested here.
@@ -75,7 +92,7 @@ The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves int
 - [x] Usage per agent: activeSeconds, toolWaitSeconds (calls over 60 s), compactions, runtimeVersion, Codex sub-agent trees and Claude sub-agents (`core/usage.mjs`, #4823's fixtures)
 - [x] gate.checked and review.done: `pipexp event gate.checked|review.done --json`, detached and fail-open
 - [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no Nudj key prefix check
-- [ ] attemptId per claim and finishing a displaced run as abandoned on takeover: needs the ship skill to call `pipexp stage ship:S1 --claim takeover` (monorepo change, not in this repo)
+- [x] attemptId per claim (`--claim new|resume|takeover`) and finishing a displaced run as abandoned on takeover (`pipexp event run.finished --session <old task id> --lane ship`)
 - [ ] Ship skill calls the plugin instead of its own scripts, and does nothing when the plugin is not installed (monorepo change)
 
 ## Develop
