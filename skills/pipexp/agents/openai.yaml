@@ -1,0 +1,4 @@
+interface:
+  display_name: "PipeXP"
+  short_description: "Report this session to your PipeXP board"
+  default_prompt: "Connect this machine to PipeXP and show where this session is on the board."

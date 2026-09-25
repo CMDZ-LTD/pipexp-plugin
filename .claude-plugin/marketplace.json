@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pipexp",
+  "description": "PipeXP: see every coding-agent run live on one board.",
+  "owner": {
+    "name": "CMDZ",
+    "url": "https://pipexp.dev"
+  },
+  "plugins": [
+    {
+      "name": "pipexp",
+      "description": "Reports each Claude Code session to your PipeXP board: stage, time, tokens, snags and questions for a person.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"type":"assistant","timestamp":"2026-09-24T07:00:00.000Z","sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","agentId":"a3","isSidechain":true,"message":{"id":"o1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"redacted"}],"usage":{"input_tokens":9,"cache_creation_input_tokens":9,"cache_read_input_tokens":9,"output_tokens":9}}}

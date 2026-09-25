@@ -1,0 +1,46 @@
+{
+  "name": "pipexp",
+  "version": "0.1.0",
+  "description": "Reports every coding-agent session to your PipeXP board: stage, time, tokens, snags and questions for a person.",
+  "author": {
+    "name": "CMDZ",
+    "email": "derek@cmdz.ltd",
+    "url": "https://pipexp.dev"
+  },
+  "homepage": "https://pipexp.dev",
+  "repository": "https://github.com/CMDZ-LTD/pipexp-plugin",
+  "license": "UNLICENSED",
+  "keywords": [
+    "telemetry",
+    "agents",
+    "kanban",
+    "observability",
+    "ask-a-human"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "PipeXP",
+    "shortDescription": "See every agent run live on your PipeXP board",
+    "longDescription": "PipeXP puts each Codex session on a live board: which stage it is in, how long it has been there, what it cost in tokens, what slowed it down, and questions it needs a person to answer. Hooks report on their own, with no changes to your skills. Secrets, home folders and machine names are scrubbed before anything leaves this machine.",
+    "developerName": "CMDZ",
+    "category": "Productivity",
+    "capabilities": [
+      "Lifecycle hooks",
+      "MCP tools",
+      "Ask a human",
+      "Usage and cost"
+    ],
+    "websiteURL": "https://pipexp.dev",
+    "privacyPolicyURL": "https://pipexp.dev/legal/privacy",
+    "termsOfServiceURL": "https://pipexp.dev/legal/terms",
+    "defaultPrompt": [
+      "Connect this machine to PipeXP.",
+      "Where is this session on my PipeXP board?",
+      "Ask a person on PipeXP before merging."
+    ],
+    "brandColor": "#B8F53F",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
+  }
+}

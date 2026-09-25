@@ -1,0 +1,20 @@
+{
+  "name": "pipexp",
+  "version": "0.1.0",
+  "description": "Reports every coding-agent session to your PipeXP board: stage, time, tokens, snags and questions for a person.",
+  "author": {
+    "name": "CMDZ",
+    "email": "derek@cmdz.ltd",
+    "url": "https://pipexp.dev"
+  },
+  "homepage": "https://pipexp.dev",
+  "repository": "https://github.com/CMDZ-LTD/pipexp-plugin",
+  "license": "UNLICENSED",
+  "keywords": [
+    "telemetry",
+    "agents",
+    "kanban",
+    "observability",
+    "ask-a-human"
+  ]
+}

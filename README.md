@@ -1,0 +1,89 @@
+# PipeXP plugin
+
+See every coding-agent session live on your [PipeXP](https://pipexp.dev) board: which stage it is in, how long
+it has sat there, what it cost in tokens, what slowed it down, and questions it needs a person to answer.
+Install it once per machine. Your own skills need no changes.
+
+| Harness | Status |
+|---|---|
+| Codex | Phase 1: hooks, skill, MCP server |
+| Claude Code | Phase 2: same hooks and MCP server; manifest in `.claude-plugin/` |
+| Cursor, Gemini CLI, OpenCode, Qoder, Devin | Phase 3 |
+
+## Install (Codex)
+
+```bash
+codex plugin marketplace add CMDZ-LTD/pipexp-plugin
+codex plugin add pipexp@pipexp
+```
+
+Then open `/hooks` in Codex and trust PipeXP's hooks (Codex asks once; updates keep the same hook command,
+so they do not ask again). Start a session: a browser tab opens at pipexp.dev/connect with a code. Check the
+code, click **Connect**, and the session is on your board. Over SSH, run `pipexp connect` and open the link it prints.
+
+## What it sends
+
+One JSON event per change to `POST <board>/events` with `x-api-key`, in the board's event schema
+(CMDZ-LTD/agent-pipeline `lib/event-schema.ts`):
+
+| Hook | Event |
+|---|---|
+| SessionStart | `run.started` (title, branch, ticket from the branch, plugin and Codex version, machine id) |
+| UserPromptSubmit | `step.entered agent:S1` Explore |
+| PostToolUse | `step.entered` Build (edits), Test (test, lint, build commands), Pull request (`gh pr create`, `git push`); a heartbeat every 30 min; a snag after 3 failing test runs in a row |
+| Stop | `usage.reported` for the turn, then `step.entered agent:S5` Waiting for you (never shown as stalled) |
+| SessionEnd | `run.finished` (ready when a PR was opened, else abandoned) |
+
+Skills with their own stages (ship, shepherd, fix-pr-comments, or yours) report them with the
+`pipexp_report_stage` MCP tool or `~/.config/pipexp/bin/pipexp stage ship:S4 --ticket NJ-1234`. The board
+defines lanes and stages (`GET /plugin/config`), not the plugin.
+
+**Never sent:** prompts, code, file contents, command output. Free text (titles, snags, questions) is scrubbed
+on this machine first: keys and tokens, env values, emails, home folders, machine names, IPv4 and IPv6 addresses,
+store domains and database ids. `pipexp content minimal` also drops session titles and branch names.
+
+**Never blocks:** a hook writes to a local outbox and exits in milliseconds; a detached process sends. Offline,
+events wait (at most 500, each retried up to 8 times) and go out in order when the board is back. Each event keeps
+its id, so a resend is never counted twice.
+
+## Files
+
+Everything lives in `~/.config/pipexp` (`PIPEXP_HOME` overrides it): `credentials.json` (the key, mode 600),
+`machine.json`, `settings.json`, `state/` (sessions, outbox, errors log), `bin/pipexp` (a stable path to the CLI).
+Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env`.
+
+## Commands
+
+```text
+pipexp connect | status | disconnect | flush | content standard|minimal
+pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
+pipexp event <type> --json '{...}'
+pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]
+```
+
+## Replaces Nudj monorepo #4823
+
+The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves into this plugin. Ticked items are built and tested here.
+
+- [x] Scrubbing: home paths, .local/.lan hosts, IPv4 and IPv6, myshopify.com, 24-hex ids, token shapes; redact before cut (`core/scrub.mjs`, `test/scrub.test.mjs`)
+- [x] Test runs send only to localhost (`PIPEXP_TEST`, `NODE_TEST_CONTEXT`, `VITEST`, `PYTEST_CURRENT_TEST`)
+- [x] Refused sends logged as type, status and field, never a value; after a 429 only run.finished (`test/queue.test.mjs`)
+- [x] Bad JSON arguments get a fixed message, never the raw input (`bin/pipexp.mjs`)
+- [x] run.started: skillVersion, skillTree (same hash as emit.mjs), machineId, parentRunId, claim, pluginVersion, runtimeVersion
+- [x] step.entered: counters and replay; usage.reported for the stage being left; heartbeat every 30 min
+- [x] run.finished: stopReason, question, link, postMerge, followUps, ownerTold pass through `pipexp event run.finished`
+- [x] Usage per agent: activeSeconds, toolWaitSeconds (calls over 60 s), compactions, runtimeVersion, Codex sub-agent trees and Claude sub-agents (`core/usage.mjs`, #4823's fixtures)
+- [x] gate.checked and review.done: `pipexp event gate.checked|review.done --json`, detached and fail-open
+- [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no Nudj key prefix check
+- [ ] attemptId per claim and finishing a displaced run as abandoned on takeover: needs the ship skill to call `pipexp stage ship:S1 --claim takeover` (monorepo change, not in this repo)
+- [ ] Ship skill calls the plugin instead of its own scripts, and does nothing when the plugin is not installed (monorepo change)
+
+## Develop
+
+```bash
+npm test            # node:test, no dependencies
+npm run validate    # Codex plugin manifest check
+```
+
+To try local changes in Codex: `python3 ~/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py .`,
+then `codex plugin add pipexp@personal` and start a new session.

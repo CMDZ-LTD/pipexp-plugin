@@ -1,0 +1,17 @@
+{
+  "name": "pipexp-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The PipeXP plugin: reports coding-agent sessions to a PipeXP board.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "pipexp": "./bin/pipexp.mjs"
+  },
+  "scripts": {
+    "test": "PIPEXP_TEST=1 node --test test/*.test.mjs",
+    "validate": "python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py ."
+  }
+}
