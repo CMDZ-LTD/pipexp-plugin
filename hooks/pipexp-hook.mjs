@@ -6,6 +6,7 @@ import { hook, runtimeOf } from "../core/run.mjs";
 import { notice } from "../core/connect.mjs";
 
 let raw = "";
+process.stdout.on("error", () => process.exit(0));
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (raw += d));
 process.stdin.on("end", () => {

@@ -276,6 +276,15 @@ export function onReport(state, report, ctx) {
     Object.assign(s.fields, fields);
     start(s, ctx, fields.claim ?? (s.started ? "resume" : "new"), out);
   } else {
+    // Finishing a run this machine never started (a takeover from another task or machine): its run id comes from
+    // its session id, so just close it; resending its start would overwrite the card with this session's details.
+    if (report.type === "run.finished" && !s.started) {
+      if (report.lane) s.skill = report.lane;
+      out.push(event(s, "run.finished", { prNumber: null, ...fields }, at));
+      s.started = true;
+      s.finished = true;
+      return { state: s, events: out };
+    }
     revive(s, ctx, out);
     if (report.type === "usage.reported") out.push(usageMarker(s, fields.stage ?? s.stage, at));
     else {

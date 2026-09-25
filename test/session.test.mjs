@@ -174,6 +174,17 @@ test("a second skill lane in one session is its own run, a child of the ship run
   assert.equal(started.parentRunId, ship);
 });
 
+test("a takeover finishes the displaced task's run by its session id, in its lane, without resending its start", () => {
+  const OLD = "01a0aaaa-0000-7000-8000-000000000001";
+  const fresh = onHook(null, { session_id: OLD, cwd: "/repo", hook_event_name: "none" }, ctx(T0)).state;
+  const r = onReport(fresh, { type: "run.finished", lane: "ship", ticket: "NJ-7", fields: { outcome: "abandoned" } }, ctx(T0 + MIN));
+  assert.deepEqual(brief(r.events), ["run.finished"]);
+  assert.equal(r.events[0].runId, uuid5("pipexp/session/" + OLD), "the same run the other task reported");
+  assert.equal(r.events[0].skill, "ship");
+  assert.equal(r.events[0].ticket, "NJ-7");
+  assert.equal(r.events[0].prNumber, null);
+});
+
 test("a claim starts a new attempt: its run.started says takeover, and every later event carries the attempt", () => {
   const s = play([[0, { hook_event_name: "UserPromptSubmit" }]]).state;
   const first = onReport(s, { type: "stage", stage: "ship:S1", ticket: "NJ-9", claim: "new" }, ctx(T0 + MIN));

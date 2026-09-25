@@ -24,6 +24,8 @@ const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
 const EVENTS = ["run.started", "snag.reported", "usage.reported", "run.finished", "gate.checked", "review.done", "pr.status"];
 
 const out = (line) => process.stdout.write(line + "\n");
+// A reader that stops early (pipexp status | head -1) closes the pipe; that is not an error for a script.
+process.stdout.on("error", () => process.exit(0));
 const fail = (why, code = 2) => {
   process.stderr.write("pipexp: " + why + "\n");
   process.exit(code);
@@ -46,6 +48,7 @@ const { positionals, values } = parseArgs({
     background: { type: "boolean" },
     runtime: { type: "string" },
     claim: { type: "string" },
+    lane: { type: "string" },
   },
 });
 const [cmd, arg] = positionals;
@@ -111,7 +114,8 @@ async function main() {
   if (cmd === "event") {
     if (!EVENTS.includes(arg)) fail("event type is one of " + EVENTS.join(", "));
     if (values.ticket && !TICKET.test(values.ticket)) fail("ticket looks like ABC-123");
-    report(session(), { type: arg, ticket: values.ticket, fields: parse(values.json, "--json") }, runtime);
+    if (values.lane && !/^[a-z0-9-]{1,40}$/.test(values.lane)) fail("lane looks like ship");
+    report(session(), { type: arg, ticket: values.ticket, lane: values.lane, fields: parse(values.json, "--json") }, runtime);
     return;
   }
   if (cmd === "ask") {
