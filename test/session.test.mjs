@@ -156,7 +156,14 @@ test("a skill reporting ship stages moves the run into the ship lane, with its f
   assert.deepEqual(next.events[1].counters, { reviewRound: 2 });
 });
 
-test("a second skill lane in one session is its own run, a child of the ship run", () => {
+test("while ship's own scripts hold a claim on the session, a stage report adds nothing (no second card)", () => {
+  const s = play([[0, { hook_event_name: "UserPromptSubmit" }]]).state;
+  const r = onReport(s, { type: "stage", stage: "ship:S4", ticket: "NJ-1" }, ctx(T0 + MIN, { probe: probe({ shipClaim: () => "NJ-1" }) }));
+  assert.deepEqual(r.events, []);
+  assert.equal(r.state.shipOwned, true);
+});
+
+test("a second skill lane in one session is its own run, a child of the ship run (no ship scripts)", () => {
   let s = play([[0, { hook_event_name: "UserPromptSubmit" }]]).state;
   s = onReport(s, { type: "stage", stage: "ship:S8", ticket: "NJ-1" }, ctx(T0 + MIN)).state;
   const ship = s.runId;

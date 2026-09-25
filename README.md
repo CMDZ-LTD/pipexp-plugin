@@ -32,7 +32,7 @@ One JSON event per change to `POST <board>/events` with `x-api-key`, in the boar
 | UserPromptSubmit | `step.entered agent:S1` Explore |
 | PostToolUse | `step.entered` Build (edits), Test (test, lint, build commands), Pull request (`gh pr create`, `git push`); a heartbeat every 30 min; a snag after 3 failing test runs in a row |
 | Stop | `usage.reported` for the turn, then `step.entered agent:S5` Waiting for you (never shown as stalled) |
-| SessionEnd | `run.finished` (ready when a PR was opened, else abandoned) |
+| SessionEnd | `run.finished`: ready when the session ended after its turn (or opened a PR), abandoned when it was cut off mid-turn |
 
 Skills with their own stages (ship, shepherd, fix-pr-comments, or yours) report them with the
 `pipexp_report_stage` MCP tool or `~/.config/pipexp/bin/pipexp stage ship:S4 --ticket NJ-1234`. The board

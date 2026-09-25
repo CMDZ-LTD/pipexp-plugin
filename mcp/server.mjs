@@ -113,7 +113,8 @@ async function callTool(name, args = {}) {
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");
-    const { state } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd);
+    const { state, events } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd);
+    if (!events.length && state.shipOwned) return ok("This session is already reported by the repo's ship scripts; nothing to add.");
     return ok("On the board: " + state.stage + (state.ticket ? " for " + state.ticket : ""));
   }
   if (name === "pipexp_report_snag") {

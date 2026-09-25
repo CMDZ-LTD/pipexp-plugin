@@ -236,6 +236,12 @@ export function onReport(state, report, ctx) {
   const out = [];
   const at = ctx.now;
   s.lastSeenAt = at;
+  // While a repo's own ship scripts still send telemetry, a session they claimed is theirs: reporting it here
+  // too would put a second card on the board. The guard turns itself off once those scripts are gone.
+  if (ctx.probe.shipClaim(s.cwd, s.sessionId)) {
+    s.shipOwned = true;
+    return { state: s, events: [] };
+  }
   const fields = { ...(report.fields ?? {}) };
   if (report.ticket) s.ticket = report.ticket;
   if (report.type === "stage") {
@@ -264,7 +270,6 @@ export function onReport(state, report, ctx) {
       if (skill !== "agent") s.fields = { ...(ctx.probe.skillInfo?.(s.cwd, skill) ?? {}), ...s.fields };
     }
     s.explicit = true;
-    s.shipOwned = false;
     if (moved || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
     enter(s, report.stage, at, out, fields);
   } else if (report.type === "run.started") {
