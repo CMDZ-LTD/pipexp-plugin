@@ -70,7 +70,8 @@ export function newState(input, ctx) {
     cwd: input.cwd ?? null,
     transcriptPath: input.transcript_path ?? null,
     skill: "agent",
-    ticket: null,
+    ticket: /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ctx.ticket ?? "") ? ctx.ticket : null,
+    ticketReported: /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ctx.ticket ?? ""),
     title: null,
     branch: null,
     stage: null,
@@ -83,7 +84,8 @@ export function newState(input, ctx) {
     explicit: false,
     shipOwned: false,
     prNumber: null,
-    fields: {},
+    // Started by a restart from the board (CMD-80): linked to the run it replaced, on the same ticket.
+    fields: /^[0-9a-f-]{36}$/i.test(ctx.parentRunId ?? "") ? { parentRunId: ctx.parentRunId } : {},
     fails: 0,
     lastSeenAt: ctx.now,
   };
