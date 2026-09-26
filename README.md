@@ -67,7 +67,11 @@ defines lanes and stages (`GET /plugin/config`), not the plugin.
 
 **Never sent:** prompts, code, file contents, command output. Free text (titles, snags, questions) is scrubbed
 on this machine first: keys and tokens, env values, emails, home folders, machine names, IPv4 and IPv6 addresses,
-store domains and database ids. `pipexp content minimal` also drops session titles and branch names.
+store domains and database ids. `pipexp content minimal` also drops session titles, branch names and the creator's login.
+A project owner can set minimal for the whole project on the board (Settings); the plugin reads it from `/plugin/config` and
+sends minimal for that repo's sessions, whatever this machine is set to. A machine can be stricter than its project,
+never looser. `pipexp preview` prints what this session sends next, exactly as it will go. The scrubber passes the board's
+own redaction cases (`test/fixtures/redaction-fixtures.json`, a copy of agent-pipeline `lib/redaction-fixtures.json`).
 
 **Never blocks:** a hook writes to a local outbox and exits in milliseconds; a detached process sends. Offline,
 events wait (at most 500, each retried up to 8 times) and go out in order when the board is back. Each event keeps
@@ -82,7 +86,7 @@ Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`,
 ## Commands
 
 ```text
-pipexp connect | status | disconnect | flush | content standard|minimal
+pipexp connect | status | disconnect | flush | preview [--all] [--raw] | content standard|minimal
 pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'
