@@ -4,6 +4,7 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## 0.1.5 (unreleased)
 
+- Status says which event the board refused and its 400 reason, and suggests an upgrade only when a newer release is out (CMD-370).
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 
 ## 0.1.4 (2026-09-26)

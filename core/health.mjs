@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { credentials, machine, osName, readJson, stateDir, VERSION, writeJson } from "./config.mjs";
+import { credentials, machine, osName, readJson, stateDir, underTest, VERSION, writeJson } from "./config.mjs";
 import { disconnected } from "./connect.mjs";
 import { enqueue, pending } from "./queue.mjs";
 
@@ -31,13 +31,44 @@ export function hooksTrusted(codexHome = process.env.CODEX_HOME || join(homedir(
 /** What the last flush left: { at, left, sentAt }. bin/flush.mjs writes it. */
 export const flushNote = () => readJson(join(stateDir(), "flush.json")) ?? {};
 
-function refusedLately(now) {
+/** The last refusal in the past day, from state/errors.log (core/send.mjs logRefusal): { at, type, status, field }, or null. */
+export function lastRefusal(now = Date.now()) {
   try {
-    const last = readFileSync(join(stateDir(), "errors.log"), "utf8").trimEnd().split("\n").at(-1);
-    return now - Date.parse(last.split("\t")[0]) < DAY;
+    const [at, type, status, field] = readFileSync(join(stateDir(), "errors.log"), "utf8").trimEnd().split("\n").at(-1).split("\t");
+    return now - Date.parse(at) < DAY ? { at, type, status: Number(status), field: field || null } : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// --- Is a newer plugin out? The newest v<x.y.z> tag, read at most once a day by the flusher, kept in state/latest.json.
+const RELEASES = "https://api.github.com/repos/CMDZ-LTD/pipexp-plugin/tags?per_page=20";
+const parts = (v) => String(v).replace(/^v/, "").split(".").map(Number);
+/** a > b for x.y.z versions. */
+export const newer = (a, b) => {
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  return false;
+};
+/** The newest released version known on this machine, or null when it has not been read yet. */
+export const latestKnown = () => readJson(join(stateDir(), "latest.json"))?.version ?? null;
+/** True only when a released version is known and ahead of this one. */
+export const behind = (latest = latestKnown()) => !!latest && newer(latest, VERSION);
+
+/** Reads the newest release tag, once a day. Never throws; a failed read keeps what was known. Tests pass their own fetch. */
+export async function checkLatest(now = Date.now(), get = fetch) {
+  const file = join(stateDir(), "latest.json");
+  if (underTest() && get === fetch) return latestKnown();
+  if (now - (readJson(file)?.at ?? 0) < DAY) return latestKnown();
+  try {
+    const res = await get(RELEASES, { headers: { accept: "application/vnd.github+json", "user-agent": "pipexp-plugin" }, signal: AbortSignal.timeout(5000) });
+    const tags = res.ok ? await res.json() : [];
+    const version = tags.map((t) => t?.name).filter((n) => /^v\d+\.\d+\.\d+$/.test(n ?? "")).map((n) => n.slice(1)).sort((a, b) => (newer(a, b) ? -1 : newer(b, a) ? 1 : 0))[0] ?? null;
+    writeJson(file, { at: now, version: version ?? latestKnown() });
+  } catch {
+    writeJson(file, { at: now, version: latestKnown() });
+  }
+  return latestKnown();
 }
 
 export const FIX = {
@@ -45,8 +76,17 @@ export const FIX = {
   key_refused: "The board refused this machine's key. Fix: pipexp connect",
   hooks_untrusted: "PipeXP's hooks are not trusted, so sessions do not show on the board. Fix: in Codex, open /hooks and trust PipeXP",
   board_unreachable: "Events are waiting: the board could not be reached. Fix: check the network, then run pipexp flush",
-  event_refused: "The board refused an event in the last day (see state/errors.log). Fix: codex plugin marketplace upgrade pipexp",
+  // Filled in by problem() with what was refused and why (refusedLine).
+  event_refused: "The board refused an event in the last day (see state/errors.log).",
 };
+
+/** What the board refused and why, and the fix: an upgrade only when a newer plugin is out, else report it. */
+export function refusedLine(r, latest = latestKnown()) {
+  const what = "The board refused a " + r.type + " event (" + r.status + (r.field ? ", field " + r.field : "") + ") at " + r.at.slice(11, 16) + " UTC.";
+  return behind(latest)
+    ? what + " Fix: a newer plugin is out (" + latest + "): codex plugin marketplace upgrade pipexp"
+    : what + " This plugin (" + VERSION + ") is the newest, so an upgrade will not fix it: tell whoever runs the board, with that line.";
+}
 
 /** The one thing to fix first, as { code, line }, or null when all is well. */
 export function problem(now = Date.now()) {
@@ -58,10 +98,10 @@ export function problem(now = Date.now()) {
         ? "hooks_untrusted"
         : flushNote().left > 0 && pending() > 0
           ? "board_unreachable"
-          : refusedLately(now)
+          : lastRefusal(now)
             ? "event_refused"
             : null;
-  return code && { code, line: FIX[code] };
+  return code && { code, line: code === "event_refused" ? refusedLine(lastRefusal(now)) : FIX[code] };
 }
 
 /** The agents this machine ran lately, newest version of each, from the sessions the hooks saved. */

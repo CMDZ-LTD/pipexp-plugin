@@ -73,3 +73,42 @@ test("the audit goes out on connect and then once a day with the next flush, and
   assert.equal(audits[0].body.plugin.hooksTrusted, true);
   assert.ok(JSON.parse(readFileSync(join(home, "state", "flush.json"), "utf8")).sentAt, "the last event time is kept for the next audit");
 });
+
+test("CMD-370: a refusal names the event and the board's reason, and says an upgrade will not help on the newest plugin", async () => {
+  config(true);
+  const state = join(home, "state");
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, "errors.log"), "2026-09-26T08:10:00.000Z\tmachine.audit\t400\trows\n2026-09-26T08:45:47.972Z\trun.finished\t400\toutcome\n");
+  const { lastRefusal } = await import("../core/health.mjs");
+  assert.deepEqual(lastRefusal(T), { at: "2026-09-26T08:45:47.972Z", type: "run.finished", status: 400, field: "outcome" });
+  const p = problem(T);
+  assert.equal(p.code, "event_refused");
+  assert.match(p.line, /^The board refused a run\.finished event \(400, field outcome\) at 08:45 UTC\./);
+  // No newer release known (never read, or this is the newest): no upgrade advice.
+  assert.doesNotMatch(p.line, /marketplace upgrade/);
+  assert.match(p.line, new RegExp("This plugin \\(" + VERSION.replace(/\./g, "\\.") + "\\) is the newest"));
+  writeFileSync(join(state, "latest.json"), JSON.stringify({ at: T, version: VERSION }));
+  assert.doesNotMatch(problem(T).line, /marketplace upgrade/);
+  // Older than a day: nothing to say.
+  assert.equal(problem(T + 86_400_000)?.code ?? null, null);
+});
+
+test("CMD-370: status suggests an upgrade only when the newest release tag is ahead of this plugin", async () => {
+  const { checkLatest, behind, newer } = await import("../core/health.mjs");
+  assert.equal(newer("0.1.10", "0.1.9"), true);
+  assert.equal(newer("0.1.4", "0.1.4"), false);
+  const state = join(home, "state");
+  writeFileSync(join(state, "latest.json"), "null");
+  const ahead = VERSION.replace(/\d+$/, (n) => String(Number(n) + 1));
+  const asked = [];
+  const tags = async (url) => { asked.push(url); return { ok: true, json: async () => [{ name: "v" + ahead }, { name: "v" + VERSION }, { name: "not-a-version" }] }; };
+  assert.equal(await checkLatest(T, tags), ahead);
+  assert.equal(behind(), true);
+  assert.match(problem(T).line, new RegExp("Fix: a newer plugin is out \\(" + ahead.replace(/\./g, "\\.") + "\\): codex plugin marketplace upgrade pipexp$"));
+  // Read at most once a day, and a failed read keeps what was known.
+  await checkLatest(T + 1000, tags);
+  assert.equal(asked.length, 1);
+  assert.equal(await checkLatest(T + 86_400_001, async () => { throw new Error("offline"); }), ahead);
+  writeFileSync(join(state, "errors.log"), "");
+});
+
