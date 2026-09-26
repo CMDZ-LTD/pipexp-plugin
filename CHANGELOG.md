@@ -4,11 +4,15 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
-- Status says which event the board refused and its 400 reason, and suggests an upgrade only when a newer release is out (CMD-370).
-- Tools find the session from a git worktree the session did not start in: by the Codex thread id, else by the one session in another worktree of the same repo; the error names the folder it looked in (CMD-370).
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 
-## 0.1.5 (2026-09-26)
+## 0.1.6 (2026-09-26)
+
+- Status says which event the board refused and its 400 reason, and suggests an upgrade only when a newer release is out (CMD-370).
+- Tools find the session from a git worktree the session did not start in: by the Codex thread id, else by the one session in another worktree of the same repo; the error names the folder it looked in (CMD-370).
+- Includes everything in 0.1.5, which was merged but never tagged.
+
+## 0.1.5 (2026-09-26, not tagged)
 
 - Cards say who started them: the machine's GitHub login, read from gh's config (never the network). Minimal content names nobody.
 - A card's ticket, branch and PR follow the branch the session is on now, checked at each prompt and after git switch or checkout. A ticket the agent reported stays until a branch names another.
