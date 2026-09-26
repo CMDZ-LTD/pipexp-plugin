@@ -76,6 +76,10 @@ test("every event the hooks make matches the board's schema fixtures (lib/plugin
     const { _usage, agents, ...rest } = e;
     for (const key of Object.keys(rest)) assert.ok(key in want || ["ticket", "attemptId"].includes(key), e.type + " sends " + key + ", which the board fixture does not have");
   }
+  // A Cursor session's run.started also says its tokens are not reported, a field the board fixture has.
+  const cursor = onHook(null, { hook_event_name: "SessionStart", session_id: "c-1", cwd: "/repo" }, ctx(T0, { runtime: "cursor" })).events[0];
+  assert.equal(cursor.tokensReported, false);
+  for (const key of Object.keys(cursor)) assert.ok(key in fixtures["run.started"] || ["ticket", "attemptId"].includes(key), "cursor run.started sends " + key);
 });
 
 test("a session that ends after its turn is ready; one cut off mid-turn is abandoned", () => {

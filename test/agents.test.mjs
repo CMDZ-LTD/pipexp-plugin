@@ -45,6 +45,8 @@ test("Cursor: its camelCase events and conversation_id become a run in the agent
   assert.deepEqual(brief(events), ["run.started", "step.entered agent:S1", "usage.reported agent:S1", "step.entered agent:S2", "usage.reported agent:S2", "step.entered agent:S3", "usage.reported agent:S3", "step.entered agent:S5", "run.finished"]);
   assert.ok(events.every((e) => e.runtime === "cursor"));
   assert.equal(events.at(-1).outcome, "ready");
+  // No token counts on the machine: the board is told, so it says "Tokens not reported" rather than 0.
+  assert.equal(events[0].tokensReported, false);
 });
 
 test("Cursor: a failed test (exitCode) and postToolUseFailure both count toward the 3-failures snag", () => {
@@ -66,6 +68,7 @@ test("Gemini CLI: BeforeAgent, AfterTool and AfterAgent map to prompt, tool and 
   ]);
   assert.deepEqual(brief(events), ["run.started", "step.entered agent:S1", "usage.reported agent:S1", "step.entered agent:S2", "usage.reported agent:S2", "step.entered agent:S5"]);
   assert.ok(events.every((e) => e.runtime === "gemini"));
+  assert.equal(events[0].tokensReported, undefined);
   assert.equal(adapt("gemini", { hook_event_name: "AfterTool", session_id: "g", tool_name: "x", tool_response: { error: { message: "no" } } }, {}).hook_event_name, "PostToolUseFailure");
   assert.equal(adapt("gemini", { hook_event_name: "BeforeModel", session_id: "g" }, {}), null);
 });

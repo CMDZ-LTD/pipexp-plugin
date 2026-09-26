@@ -9,7 +9,7 @@ Install it once per machine. Your own skills need no changes.
 | Codex | Works: hooks, skill, MCP server |
 | Claude Code | Works: the same hooks file, skill and MCP server (`.claude-plugin/`) |
 | Gemini CLI | Works: a Gemini extension (`gemini-extension.json`); tokens from its transcript |
-| Cursor | Works: `pipexp install cursor` adds hooks to `~/.cursor/hooks.json`. Cursor keeps no token counts on the machine, so cards show none |
+| Cursor | Works: `pipexp install cursor` adds hooks to `~/.cursor/hooks.json`. Cursor keeps no token counts on the machine, so cards say "Tokens not reported" |
 | OpenCode | Works: `pipexp install opencode` adds a small plugin; tokens from OpenCode's own messages |
 | Qoder, Devin | Next |
 
@@ -135,5 +135,5 @@ then `codex plugin add pipexp@personal` and start a new session. Never commit th
 `test/version.test.mjs` fails on it.
 
 Release: bump the version in `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `package.json` and `VERSION` in
-`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.1 && git push --tags`). Installed copies
+`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.3 && git push --tags`). Installed copies
 pick it up with `codex plugin marketplace upgrade pipexp`.

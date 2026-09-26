@@ -14,7 +14,8 @@
     "runtimeVersion": "codex 0.155.1",
     "pluginVersion": "pipexp 0.1.0",
     "machineId": "7d2f0a9b-1c3e-4f5a-8b6d-9e0f1a2b3c4d",
-    "claim": "new"
+    "claim": "new",
+    "tokensReported": false
   },
   "step.entered": {
     "type": "step.entered",
