@@ -10,7 +10,12 @@ Codex first, Claude Code next, then other harnesses. Derek (CMDZ CEO, dyslexic: 
   `connect.mjs` (the only code that knows how a machine connects), `ask.mjs`, `run.mjs` (glue).
 - `hooks/pipexp-hook.mjs` is the one command every hook runs. Keep `hooks/hooks.json` byte-stable: Codex asks people
   to re-trust hooks whose definition changes. Add behaviour in core, not new hook commands.
-- Codex and Claude Code both load `hooks/hooks.json`. Never add a `hooks` key to `.claude-plugin/plugin.json`: Claude loads it
+- Codex, Claude Code and Gemini CLI all load `hooks/hooks.json` and skip event names they do not have (checked live for
+  Codex and Claude). Gemini's entries use its own names (BeforeAgent, AfterTool, AfterAgent), `${extensionPath}` and a timeout in
+  milliseconds. Cursor (`~/.cursor/hooks.json`) and OpenCode (a JS plugin, `opencode/pipexp.mjs`) are set up by
+  `pipexp install` (`core/install.mjs`). `core/adapt.mjs` turns each agent's payload into the Claude-shaped one core reads.
+- Hooks run as separate processes that can overlap; `withSessionLock` in `core/run.mjs` keeps one per session at a time.
+- Never add a `hooks` key to `.claude-plugin/plugin.json`: Claude loads it
   as well as the default file, and every event is sent twice. `runtimeOf()` in `core/run.mjs` tells the harnesses apart
   (PLUGIN_ROOT is Codex only; a CODEX_THREAD_ID leaks into a Claude started from a Codex terminal).
 - `mcp/server.mjs` (stdio MCP, no SDK) and `bin/pipexp.mjs` (CLI) are thin over core.

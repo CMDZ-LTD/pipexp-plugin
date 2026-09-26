@@ -29,3 +29,25 @@ test("an MCP report finds the session by folder, through a symlinked path, and a
 test("a hook with no session id does nothing", () => {
   assert.deepEqual(hook({ hook_event_name: "Stop" }), []);
 });
+
+test("hooks fired at the same moment in separate processes never undo each other's state (OpenCode, Cursor)", async () => {
+  const { spawn } = await import("node:child_process");
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const launcher = new URL("../hooks/pipexp-hook.mjs", import.meta.url).pathname;
+  const run = (payload) =>
+    new Promise((done) => {
+      const child = spawn(process.execPath, [launcher, "--runtime", "opencode"], { env: { ...process.env }, stdio: ["pipe", "ignore", "ignore"] });
+      child.on("exit", done);
+      child.stdin.end(JSON.stringify(payload));
+    });
+  const base = { session_id: "race-1", cwd: "/repo" };
+  await run({ ...base, hook_event_name: "UserPromptSubmit" });
+  // Twelve edits and test runs at once, then the end of the turn.
+  await Promise.all(Array.from({ length: 12 }, (_, i) => run({ ...base, hook_event_name: "PostToolUse", tool_name: i % 2 ? "edit" : "bash", tool_input: { command: "npm test" } })));
+  await run({ ...base, hook_event_name: "Stop" });
+  const dir = join(process.env.PIPEXP_HOME, "state", "outbox");
+  const events = readdirSync(dir).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")).event).filter((e) => e.runId && e.type === "run.started");
+  assert.equal(events.filter((e) => e.runtime === "opencode").length, 1, "one run.started: every process saw the state the one before it saved");
+  assert.equal(loadSession("race-1").stage, "agent:S5");
+  assert.ok(!readdirSync(join(process.env.PIPEXP_HOME, "state", "sessions")).some((f) => f.endsWith(".lock")), "no lock left behind");
+});

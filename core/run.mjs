@@ -1,10 +1,11 @@
 // The glue every entry point shares: load a session's state, apply a hook or a report, queue the events, and
 // start one detached flush. Nothing here waits on the network.
 import { spawn } from "node:child_process";
-import { mkdirSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { credentials, machine, readJson, stateDir, writeJson } from "./config.mjs";
+import { RUNTIMES } from "./adapt.mjs";
 import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { scrubEvent } from "./scrub.mjs";
@@ -26,8 +27,11 @@ const settings = () => readJson(join(stateDir(), "..", "settings.json")) ?? {};
 export const runtimeOf = (env = process.env, argv = process.argv) => {
   const flag = argv.indexOf("--runtime");
   const given = flag >= 0 ? argv[flag + 1] : env.PIPEXP_RUNTIME;
-  if (given === "codex" || given === "claude") return given;
+  if (RUNTIMES.includes(given)) return given;
   if (env.PLUGIN_ROOT) return "codex";
+  // Cursor also runs Claude-format hooks from ~/.claude and sets CLAUDE_PLUGIN_ROOT for them: it wins over Claude.
+  if (env.CURSOR_VERSION || env.CURSOR_PROJECT_DIR) return "cursor";
+  if (env.GEMINI_SESSION_ID || env.GEMINI_PROJECT_DIR) return "gemini";
   if (env.CLAUDE_PLUGIN_ROOT || env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return "claude";
   return "codex";
 };
@@ -62,13 +66,46 @@ export function kick() {
   }
 }
 
+/**
+ * One process at a time per session: agents fire hooks back to back (a tool call, then the turn ending), each in
+ * its own process, and each reads, changes and saves the session's state. Without this, a later write can undo an
+ * earlier one. Waits at most ~1 s; a lock older than 10 s belongs to a crashed hook and is taken over.
+ */
+function withSessionLock(id, fn) {
+  mkdirSync(sessions(), { recursive: true, mode: 0o700 });
+  const lock = sessionFile(id) + ".lock";
+  let held = false;
+  for (let i = 0; i < 100 && !held; i++) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      held = true;
+    } catch {
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 10_000) unlinkSync(lock);
+      } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) {
+      try {
+        unlinkSync(lock);
+      } catch {}
+    }
+  }
+}
+
 /** One hook payload in, events queued out. Returns the events (tests read them). */
 export function hook(input, runtime = runtimeOf()) {
   if (!input?.session_id) return [];
-  const existing = loadSession(input.session_id);
-  const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion);
-  const { state, events } = onHook(existing, input, ctx);
-  commit(state, events);
+  const events = withSessionLock(input.session_id, () => {
+    const existing = loadSession(input.session_id);
+    const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion);
+    const { state, events } = onHook(existing, input, ctx);
+    return commit(state, events);
+  });
   if (events.length && credentials()) kick();
   prune();
   return events;
@@ -76,12 +113,15 @@ export function hook(input, runtime = runtimeOf()) {
 
 /** An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. */
 export function report(sessionId, rep, runtime = runtimeOf(), cwd = process.cwd()) {
-  const existing = loadSession(sessionId);
-  const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion);
-  // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
-  const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
-  const { state, events } = onReport(base, rep, ctx);
-  commit(state, events);
+  const { state, events } = withSessionLock(sessionId, () => {
+    const existing = loadSession(sessionId);
+    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion);
+    // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
+    const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
+    const result = onReport(base, rep, ctx);
+    commit(result.state, result.events);
+    return result;
+  });
   if (credentials()) kick();
   return { state, events };
 }
@@ -124,6 +164,7 @@ function prune() {
   try {
     const cutoff = Date.now() - 14 * 86_400_000;
     for (const name of readdirSync(sessions())) {
+      if (name.endsWith(".lock")) continue;
       const path = join(sessions(), name);
       if (statSync(path).mtimeMs < cutoff) unlinkSync(path);
     }

@@ -8,11 +8,14 @@
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp flush                         send what is queued now
+//   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
+//   pipexp uninstall cursor              take PipeXP out of Cursor's hooks
 // Every report command takes --session <id> (default: this Codex or Claude session) and never fails a script:
 // it exits 0 unless the arguments are wrong (2). ask exits 3 when it cannot get an answer.
 import { parseArgs } from "node:util";
 import { credentials, home, machine, readJson, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
+import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending } from "../core/queue.mjs";
 import { currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
@@ -97,6 +100,10 @@ async function main() {
     writeJson(join(home(), "settings.json"), { ...(readJson(join(home(), "settings.json")) ?? {}), content: arg });
     return out("Content level: " + arg);
   }
+  if (cmd === "install" || cmd === "uninstall") {
+    const r = cmd === "uninstall" ? (arg === "cursor" ? uninstallCursor() : fail("uninstall takes cursor")) : arg === "cursor" ? installCursor() : arg === "opencode" ? installOpencode() : fail("install takes cursor or opencode");
+    return r.ok ? out((cmd === "install" ? "Added PipeXP to " : "Removed PipeXP from ") + r.path) : fail(r.reason, 1);
+  }
   if (cmd === "flush") {
     const r = await flushNow();
     return out("Sent " + r.sent + ", left " + r.left);
@@ -123,7 +130,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, disconnect, stage, event, ask, content, flush");
+  fail("commands: connect, status, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

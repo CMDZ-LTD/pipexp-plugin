@@ -8,7 +8,10 @@ Install it once per machine. Your own skills need no changes.
 |---|---|
 | Codex | Works: hooks, skill, MCP server |
 | Claude Code | Works: the same hooks file, skill and MCP server (`.claude-plugin/`) |
-| Cursor, Gemini CLI, OpenCode, Qoder, Devin | Phase 3 |
+| Gemini CLI | Works: a Gemini extension (`gemini-extension.json`); tokens from its transcript |
+| Cursor | Works: `pipexp install cursor` adds hooks to `~/.cursor/hooks.json`. Cursor keeps no token counts on the machine, so cards show none |
+| OpenCode | Works: `pipexp install opencode` adds a small plugin; tokens from OpenCode's own messages |
+| Qoder, Devin | Next |
 
 ## Install (Codex)
 
@@ -32,6 +35,18 @@ Or from a terminal: `claude plugin marketplace add CMDZ-LTD/pipexp-plugin` then 
 Start a session and approve the code, as for Codex. A machine connected once serves both: they share `~/.config/pipexp`.
 Claude sessions show as `claude <version>` on the card. Failed tool calls come from Claude's `PostToolUseFailure` hook, and tokens from its
 transcript, counted once per message, with sub-agents included.
+
+## Install (Gemini CLI, Cursor, OpenCode)
+
+```bash
+gemini extensions install https://github.com/CMDZ-LTD/pipexp-plugin   # Gemini CLI
+~/.config/pipexp/bin/pipexp install cursor                          # Cursor (IDE and cursor-agent)
+~/.config/pipexp/bin/pipexp install opencode                        # OpenCode
+```
+
+`~/.config/pipexp/bin/pipexp` is written by the first Codex or Claude Code session with the plugin. Without either, run
+`node <plugin checkout>/bin/pipexp.mjs install cursor`. The Cursor install merges: other tools' hooks stay, the old file is
+kept as `hooks.json.before-pipexp`, and `pipexp uninstall cursor` takes only PipeXP's entries out.
 
 ## What it sends
 

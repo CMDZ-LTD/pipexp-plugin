@@ -1,0 +1,13 @@
+{
+  "name": "pipexp",
+  "version": "0.1.1",
+  "description": "Reports each Gemini CLI session to your PipeXP board: stage, time, tokens and questions for a person.",
+  "mcpServers": {
+    "pipexp": {
+      "command": "node",
+      "args": [
+        "${extensionPath}/mcp/server.mjs"
+      ]
+    }
+  }
+}
