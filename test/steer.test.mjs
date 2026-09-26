@@ -49,7 +49,10 @@ test("a note is context for the next step; a stop also ends a Codex or Claude Co
   assert.equal(stop.stopReason, STOP.message);
   assert.equal(stop.hookSpecificOutput.additionalContext, NOTE.message + "\n" + STOP.message);
   assert.deepEqual(JSON.parse(steerOutput("cursor", "PostToolUse", [STOP])), { additional_context: STOP.message });
-  assert.equal(steerOutput("codex", "Stop", [NOTE]), "", "Stop cannot carry context");
+  // At the turn's end a note keeps the agent going with it; a stop, even with a note, lets the turn end.
+  assert.deepEqual(JSON.parse(steerOutput("codex", "Stop", [NOTE])), { decision: "block", reason: NOTE.message });
+  assert.equal(steerOutput("claude", "Stop", [NOTE, STOP]), "");
+  assert.equal(steerOutput("cursor", "Stop", [NOTE]), "", "Cursor's stop hook cannot continue the turn");
   assert.equal(steerOutput("codex", "PostToolUse", []), "");
 });
 
@@ -79,4 +82,31 @@ test("a session asks the board at most every 30 seconds, and a finished or ship-
   // The board down: nothing, no throw.
   assert.equal(await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s" }), 0);
   void home;
+});
+
+test("a stop shown to an agent moves its card to Waiting for you; a ship run keeps its lane", async () => {
+  const b = await board([STOP]);
+  saveCredentials({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) });
+  const launcher = new URL("../hooks/pipexp-hook.mjs", import.meta.url).pathname;
+  const fire = (sid, event, extra = {}) =>
+    spawnSync(process.execPath, [launcher, "--runtime", "codex"], { input: JSON.stringify({ session_id: sid, cwd: "/repo", hook_event_name: event, ...extra }), env: { ...process.env, PIPEXP_NO_FLUSH: "1" }, encoding: "utf8", timeout: 5000 });
+  hook({ session_id: "s-4", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
+  hook({ session_id: "s-4", cwd: "/repo", hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }, "codex");
+  await fetchSteers({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) }, loadSession("s-4"));
+  await b.close();
+  const run = fire("s-4", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" } });
+  assert.equal(JSON.parse(run.stdout).continue, false);
+  assert.equal(loadSession("s-4").stage, "agent:S5");
+  assert.equal(loadSession("s-4").skill, "agent");
+  // A ship run stopped the same way stays in its lane.
+  const { report } = await import("../core/run.mjs");
+  hook({ session_id: "s-5", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
+  report("s-5", { type: "stage", stage: "ship:S4", ticket: "ABC-12" }, "codex", "/repo");
+  const b2 = await board([STOP]);
+  saveCredentials({ url: b2.url, key: "pipexp_rk_" + "k".repeat(43) });
+  await fetchSteers({ url: b2.url, key: "pipexp_rk_" + "k".repeat(43) }, loadSession("s-5"));
+  await b2.close();
+  assert.equal(JSON.parse(fire("s-5", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" } }).stdout).continue, false);
+  assert.equal(loadSession("s-5").skill, "ship");
+  assert.equal(loadSession("s-5").stage, "ship:S4");
 });
