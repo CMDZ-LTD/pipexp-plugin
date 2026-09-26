@@ -157,7 +157,8 @@ test("pipexp install cursor merges into ~/.cursor/hooks.json: other hooks stay, 
 
 test("pipexp install opencode writes a one-line plugin that loads this checkout", () => {
   const home = mkdtempSync(join(tmpdir(), "pipexp-oc-"));
-  const { path } = installOpencode(home, undefined);
-  assert.equal(path, join(home, ".config", "opencode", "plugins", "pipexp.js"));
+  // An explicit config folder, so the test does not depend on the runner's XDG_CONFIG_HOME.
+  const { path } = installOpencode(home, join(home, "xdg"));
+  assert.equal(path, join(home, "xdg", "opencode", "plugins", "pipexp.js"));
   assert.match(readFileSync(path, "utf8"), /export \{ PipeXP, PipeXP as default \} from ".*opencode\/pipexp\.mjs";/);
 });
