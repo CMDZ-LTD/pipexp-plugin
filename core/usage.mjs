@@ -1,6 +1,6 @@
 /**
  * Usage for one agent run, read from the runtime's own logs, shaped as the board's
- * usage.reported agents array. Ported from Nudj ship's telemetry/usage.mjs (PR #4823).
+ * usage.reported agents array. Ported from a ship skill's telemetry/usage.mjs.
  *
  * Codex: the thread's rollout plus every descendant thread. Claude: the session transcript plus
  * its sub-agents; a logged effort wins, else configuredEffort(role) ("configured").

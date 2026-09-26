@@ -1,5 +1,6 @@
 // Redacts secrets, home folders, machine and customer identifiers from free text before it leaves the machine.
-// Ported from the Nudj ship skill's emit.mjs (monorepo #4823), plus the board's key shapes (lib/questions.ts).
+// Ported from a ship skill's telemetry sender, plus the board's key shapes (lib/questions.ts). nudj_rk_ is the
+// board's older key prefix: keys of that shape still exist, so they are redacted too.
 const TOKENS = [
   /eyJ[\w-]+\.[\w-]+\.[\w-]+/g,
   /\b[a-f0-9]{32,}\b/gi,

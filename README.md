@@ -77,7 +77,7 @@ its id, so a resend is never counted twice.
 
 Everything lives in `~/.config/pipexp` (`PIPEXP_HOME` overrides it): `credentials.json` (the key, mode 600),
 `machine.json`, `settings.json`, `state/` (sessions, outbox, errors log), `bin/pipexp` (a stable path to the CLI).
-Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env`.
+Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env` (kept so machines set up before PipeXP had its own name keep reporting).
 
 ## Commands
 
@@ -89,7 +89,7 @@ pipexp event <type> --json '{...}'
 pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]
 ```
 
-### Contract for skills (the Nudj ship skill calls these)
+### Contract for skills (a skill with its own stages calls these)
 
 Call `~/.config/pipexp/bin/pipexp` detached and ignore its exit code. It exits 0 unless its arguments are wrong (2); `ask` exits 3 when
 nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`, so a skill running inside a session never passes it.
@@ -106,9 +106,9 @@ nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSI
 
 Not installed: `[ -x ~/.config/pipexp/bin/pipexp ] || exit 0`. The path is written the first time a session starts with the plugin.
 
-## Replaces Nudj monorepo #4823
+## Replaces a skill's own telemetry sender
 
-The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves into this plugin. Ticked items are built and tested here.
+A ship skill's own telemetry sender moves into this plugin. Ticked items are built and tested here.
 
 - [x] Scrubbing: home paths, .local/.lan hosts, IPv4 and IPv6, myshopify.com, 24-hex ids, token shapes; redact before cut (`core/scrub.mjs`, `test/scrub.test.mjs`)
 - [x] Test runs send only to localhost (`PIPEXP_TEST`, `NODE_TEST_CONTEXT`, `VITEST`, `PYTEST_CURRENT_TEST`)
@@ -119,7 +119,7 @@ The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves int
 - [x] run.finished: stopReason, question, link, postMerge, followUps, ownerTold pass through `pipexp event run.finished`
 - [x] Usage per agent: activeSeconds, toolWaitSeconds (calls over 60 s), compactions, runtimeVersion, Codex sub-agent trees and Claude sub-agents (`core/usage.mjs`, #4823's fixtures)
 - [x] gate.checked and review.done: `pipexp event gate.checked|review.done --json`, detached and fail-open
-- [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no Nudj key prefix check
+- [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no key prefix check
 - [x] attemptId per claim (`--claim new|resume|takeover`) and finishing a displaced run as abandoned on takeover (`pipexp event run.finished --session <old task id> --lane ship`)
 - [ ] Ship skill calls the plugin instead of its own scripts, and does nothing when the plugin is not installed (monorepo change)
 

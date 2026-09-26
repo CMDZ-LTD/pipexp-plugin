@@ -1,4 +1,4 @@
-// What a hook reads from the machine: git, Codex's thread names, the Nudj ship skill's claims. All fail soft.
+// What a hook reads from the machine: git, Codex's thread names, a ship skill's claims. All fail soft.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
@@ -112,7 +112,7 @@ export function runtimeVersion(runtime, transcriptPath) {
 }
 
 /**
- * The ticket this session holds a Nudj ship claim on, while the ship skill still sends its own telemetry
+ * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
  */
 export function shipClaim(cwd, sessionId) {

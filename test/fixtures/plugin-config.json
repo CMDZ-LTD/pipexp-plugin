@@ -1,5 +1,5 @@
 {
-  "_source": "CMDZ-LTD/agent-pipeline GET /plugin/config for a project on the Nudj template (convex/plugin.test.ts). Keep in step.",
+  "_source": "CMDZ-LTD/agent-pipeline GET /plugin/config for a project on the default template (convex/plugin.test.ts). Keep in step.",
   "lanes": [
     { "skill": "ship", "label": "Ship", "stages": [{ "id": "ship:S0", "label": "Check the tools" }, { "id": "ship:S1", "label": "Take the ticket" }] },
     { "skill": "agent", "label": "Agent sessions", "stages": [

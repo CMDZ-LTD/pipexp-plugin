@@ -116,7 +116,7 @@ const clearDisconnected = () => {
   } catch {}
 };
 
-/** A stable path skills can call (the Nudj ship skill does): ~/.config/pipexp/bin/pipexp. Rewritten when the plugin moves. */
+/** A stable path skills can call (a ship skill does): ~/.config/pipexp/bin/pipexp. Rewritten when the plugin moves. */
 export function installShim() {
   const dir = join(home(), "bin");
   const path = join(dir, "pipexp");
