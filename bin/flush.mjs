@@ -2,6 +2,7 @@
 // Sends the outbox. Started detached by every hook; also "pipexp flush". Fills in usage.reported from the
 // transcript just before sending, so hooks never read big files. Silent: never prints, always exits 0.
 import { credentials } from "../core/config.mjs";
+import { noteFlush, queueAudit } from "../core/health.mjs";
 import { flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
@@ -18,7 +19,11 @@ export async function sendOne(creds, event) {
 export async function run() {
   const creds = credentials();
   if (!creds) return { sent: 0, left: 0 };
-  return flush((event) => sendOne(creds, event));
+  // Once a day, the machine's own health rides along with whatever is sent.
+  queueAudit();
+  const result = await flush((event) => sendOne(creds, event));
+  noteFlush(result);
+  return result;
 }
 
 if (import.meta.url === "file://" + process.argv[1]) run().catch(() => {});

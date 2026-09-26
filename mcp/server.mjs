@@ -4,6 +4,7 @@
 import { createInterface } from "node:readline";
 import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
+import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
 import { currentSession, loadSession, report } from "../core/run.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
@@ -83,7 +84,7 @@ const TOOLS = [
   },
   {
     name: "pipexp_status",
-    description: "Whether this machine is connected to PipeXP, what is queued, and this session's run on the board.",
+    description: "Whether PipeXP works on this machine: summary is one line saying what is wrong and the fix (tell the user), plus what is queued and this session's run on the board.",
     inputSchema: { type: "object", properties: { ...where } },
   },
 ];
@@ -111,7 +112,10 @@ async function callTool(name, args = {}) {
     const c = credentials();
     const id = sessionOf(args);
     const s = id ? loadSession(id) : null;
+    const p = problem();
     return ok({
+      summary: p ? p.line : "Working: sessions on this machine show on the board.",
+      problem: p?.code ?? null,
       connected: !!c,
       machine: machine().name,
       board: c?.boardUrl ?? "https://pipexp.dev",
@@ -164,6 +168,9 @@ async function handle(msg) {
     let result;
     try {
       result = await callTool(params?.name, params?.arguments ?? {});
+      // Hooks Codex has not been told to trust never run, so the first tool reply of the day says so.
+      const told = params?.name === "pipexp_status" ? "" : tellOnce();
+      if (told) result = { ...result, content: [...result.content, { type: "text", text: told }] };
     } catch {
       result = err("PipeXP could not do that just now. Carry on; it never blocks your work.");
     }

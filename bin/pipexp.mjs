@@ -14,8 +14,9 @@
 // Every report command takes --session <id> (default: this Codex or Claude session) and never fails a script:
 // it exits 0 unless the arguments are wrong (2). ask exits 3 when it cannot get an answer.
 import { parseArgs } from "node:util";
-import { credentials, home, machine, readJson, writeJson } from "../core/config.mjs";
+import { credentials, home, machine, readJson, VERSION, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
+import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending } from "../core/queue.mjs";
@@ -76,12 +77,18 @@ async function main() {
       let key = "";
       for await (const chunk of process.stdin) key += chunk;
       const r = saveKey(key);
-      return r.ok ? out("Connected " + r.machine + ".") : fail(r.reason, 1);
+      if (!r.ok) return fail(r.reason, 1);
+      queueAudit(true);
+      return out("Connected " + r.machine + ".");
     }
     const r = await connect({ runtime, say: values.background ? () => {} : out, open: true });
     if (r.ok) {
+      queueAudit(true);
       await flushNow().catch(() => {});
-      return values.background ? undefined : out("Connected " + r.machine + ". Runs now show on " + r.boardUrl);
+      if (values.background) return;
+      out("Connected " + r.machine + ". Runs now show on " + r.boardUrl);
+      if (hooksTrusted() === false) out("One more step: " + FIX.hooks_untrusted);
+      return;
     }
     return values.background ? undefined : fail(r.reason, 1);
   }
@@ -90,10 +97,10 @@ async function main() {
     const id = values.session ?? currentSession();
     const s = id ? loadSession(id) : null;
     const board = c?.boardUrl ?? "https://pipexp.dev";
-    out(c ? "Connected: " + machine().name + " to " + new URL(c.url).host + " (" + c.source + ")" : "Not connected. Run: pipexp connect");
-    const disc = readJson(join(home(), "state", "disconnected.json"));
-    if (disc?.at) out("The board refused this machine's key at " + disc.at + ". Run: pipexp connect");
-    out("Queued events: " + pending());
+    // Line one is the whole answer: what is wrong and the fix, or that all is well.
+    const p = problem();
+    out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
+    out("Queued events: " + pending() + " · pipexp " + VERSION);
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
