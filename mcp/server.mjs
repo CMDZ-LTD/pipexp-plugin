@@ -140,6 +140,7 @@ async function callTool(name, args = {}) {
     return ok("Snag recorded.");
   }
   if (name === "pipexp_finish") {
+    if (!["ready", "merged", "blocked", "abandoned"].includes(args.outcome)) return err("outcome is ready, merged, blocked or abandoned");
     const fields = { outcome: args.outcome };
     if (typeof args.pr_number === "number") fields.prNumber = args.pr_number;
     if (args.question) fields.question = args.question;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { ctx, probe } from "./helpers.mjs";
-import { onHook, onReport, stageForTool, ticketOf, uuid5 } from "../core/session.mjs";
+import { IDLE_MS, onHook, onIdle, onReport, stageForTool, ticketOf, uuid5 } from "../core/session.mjs";
 import { VERSION } from "../core/config.mjs";
 
 const T0 = Date.parse("2026-09-25T10:00:00Z");
@@ -251,4 +251,62 @@ test("a failed push (no remote, no auth) does not move the card to Pull request"
 test("uuid5 matches Python's uuid5(NAMESPACE_URL, ...), so ids agree with the ship scripts", () => {
   // python3 -c 'import uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "run/abandoned"))'
   assert.equal(uuid5("run/abandoned"), "bd21981f-1f72-5ab1-89ef-2b75421d85c2");
+});
+
+test("CMD-370: the card follows the branch the session is on now: ticket, branch and PR change with it", () => {
+  let branch = "codex/nj-3235-old-work";
+  const c = { probe: probe({ git: () => ({ branch, repo: "shop", top: "/repo", common: "/repo/.git" }) }) };
+  const first = play([[0, { hook_event_name: "UserPromptSubmit" }], [1, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "gh pr create --fill" }, tool_response: "https://github.com/acme/shop/pull/7" }]], c);
+  assert.equal(first.events.find((e) => e.type === "run.started").ticket, "NJ-3235");
+  assert.equal(first.state.prNumber, 7);
+  // The agent moves to new work on another branch.
+  branch = "codex/cmd-161-scope-creep";
+  const moved = onHook(first.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "git switch -c codex/cmd-161-scope-creep" } }, ctx(T0 + 5 * MIN, c));
+  const again = moved.events.find((e) => e.type === "run.started");
+  assert.ok(again, "the switch resends the run's start");
+  assert.equal(again.ticket, "CMD-161");
+  assert.equal(again.branch, "codex/cmd-161-scope-creep");
+  assert.equal(moved.state.prNumber, null, "the old branch's PR does not follow it");
+  // Checked again when the next turn starts, even with no git command in between (a switch made in a terminal).
+  branch = "codex/cmd-186-projects";
+  const next = onHook(moved.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 9 * MIN, c));
+  assert.equal(next.events.find((e) => e.type === "run.started")?.ticket, "CMD-186");
+  // Nothing changed: nothing resent.
+  const same = onHook(next.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 10 * MIN, c));
+  assert.equal(same.events.filter((e) => e.type === "run.started").length, 0);
+});
+
+test("CMD-370: a ticket the agent reported stays when the new branch names none, and is replaced when it does", () => {
+  let branch = "main";
+  const c = { probe: probe({ git: () => ({ branch, repo: "shop", top: "/repo", common: "/repo/.git" }) }) };
+  const s = play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state;
+  const reported = onReport(s, { type: "stage", stage: "agent:S2", ticket: "CMD-370" }, ctx(T0 + MIN, c)).state;
+  branch = "scratch";
+  const plain = onHook(reported, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 2 * MIN, c));
+  assert.equal(plain.state.ticket, "CMD-370");
+  branch = "codex/cmd-99-ship";
+  const named = onHook(plain.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 3 * MIN, c));
+  assert.equal(named.state.ticket, "CMD-99");
+});
+
+test("CMD-370: cards say who started them (the machine's GitHub login), and minimal content names nobody", () => {
+  const c = { probe: probe({ githubLogin: () => "octo-dev" }) };
+  const started = play([[0, { hook_event_name: "UserPromptSubmit" }]], c).events.find((e) => e.type === "run.started");
+  assert.equal(started.owner, "octo-dev");
+  const quiet = onHook(null, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0, { ...c, content: "minimal" })).events.find((e) => e.type === "run.started");
+  assert.equal(quiet.owner, null);
+});
+
+test("CMD-370: a session no hook has heard from for two hours waits for its person; a skill step or a waiting card stays", () => {
+  const s = play([[0, { hook_event_name: "UserPromptSubmit" }], [1, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }]]).state;
+  assert.equal(s.stage, "agent:S3");
+  assert.deepEqual(onIdle(s, s.lastSeenAt + IDLE_MS - 1).events, []);
+  const idle = onIdle(s, s.lastSeenAt + IDLE_MS);
+  assert.deepEqual(brief(idle.events), ["usage.reported agent:S3", "step.entered agent:S5"]);
+  assert.deepEqual(onIdle(idle.state, idle.state.lastSeenAt + 2 * IDLE_MS).events, [], "once is enough");
+  const ship = onReport(s, { type: "stage", stage: "ship:S4", ticket: "NJ-1" }, ctx(T0 + 2 * MIN)).state;
+  assert.deepEqual(onIdle(ship, ship.lastSeenAt + IDLE_MS).events, [], "a ship step keeps its stage");
+  // The next prompt moves it on as usual.
+  const back = onHook(idle.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 4 * 60 * MIN));
+  assert.deepEqual(brief(back.events).filter((e) => e.startsWith("step")), ["step.entered agent:S1"]);
 });

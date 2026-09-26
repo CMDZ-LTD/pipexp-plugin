@@ -13,6 +13,7 @@ const FAILS_FOR_SNAG = 3;
 // Edit tools by agent: Codex apply_patch; Claude Code and Cursor Edit, Write, MultiEdit, StrReplace; Gemini CLI
 // write_file, replace; OpenCode edit, write, patch.
 const EDIT_TOOLS = /^(apply_patch|Edit|Write|MultiEdit|NotebookEdit|StrReplace|write_file|replace|edit|write|patch)$/;
+const SWITCH_CMD = /\bgit\s+(checkout|switch)\b|\bgh\s+pr\s+checkout\b/;
 const PR_CMD = /\bgh\s+pr\s+(create|ready)\b|\bgit\s+push\b/;
 const TEST_CMD =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|typecheck|lint|build|check|e2e)\b|\b(npx\s+)?(vitest|jest|pytest|playwright|mocha|tsc|eslint|rspec|phpunit)\b|\bcargo\s+(test|check|clippy|build)\b|\bgo\s+(test|vet|build)\b|\b(gradle|mvn|dotnet)\s+test\b|\bnode\s+--test\b|\bmake\s+(test|check)\b/;
@@ -106,7 +107,7 @@ const usageMarker = (s, stage, at) => ({
 function startFields(s, ctx, claim) {
   return {
     title: s.title,
-    owner: null,
+    owner: s.owner ?? null,
     profile: null,
     branch: s.branch,
     claim,
@@ -119,18 +120,31 @@ function startFields(s, ctx, claim) {
   };
 }
 
-/** Reads the branch, ticket and title again; true when the title or branch changed. */
+/**
+ * Reads the branch, ticket and title again; true when the title, branch or ticket changed. A new branch is new work
+ * (CMD-370): the card takes its ticket, or keeps one the agent reported, and drops the old branch's PR.
+ */
 function refresh(s, ctx) {
-  const before = s.title + "|" + s.branch;
+  const before = s.title + "|" + s.branch + "|" + s.ticket;
   const git = ctx.probe.git(s.cwd) ?? {};
-  if (git.branch && git.branch !== "HEAD") s.branch = git.branch;
+  if (git.branch && git.branch !== "HEAD" && git.branch !== s.gitBranch) {
+    if (s.gitBranch) {
+      s.ticket = ticketOf(git.branch) ?? (s.ticketReported ? s.ticket : null);
+      s.ticketReported = s.ticketReported && !ticketOf(git.branch);
+      s.prNumber = null;
+    }
+    s.gitBranch = git.branch;
+  }
+  if (s.gitBranch) s.branch = s.gitBranch;
   s.ticket = s.ticket ?? ticketOf(s.branch);
+  // Who started it, once per session. Minimal content names nobody.
+  if (s.owner === undefined) s.owner = ctx.content === "minimal" ? null : (ctx.probe.githubLogin?.() ?? null);
   const repo = git.repo ?? (s.cwd ? s.cwd.split("/").filter(Boolean).pop() : null);
   const minimal = ctx.content === "minimal";
   const named = minimal ? null : ctx.probe.threadName(s.sessionId, s.transcriptPath);
   s.title = s.fields.title ?? (named || (minimal ? repo : [repo, s.branch].filter(Boolean).join(" · ")) || "Agent session");
   if (minimal) s.branch = null;
-  return before !== s.title + "|" + s.branch;
+  return before !== s.title + "|" + s.branch + "|" + s.ticket;
 }
 
 function enter(s, stage, at, out, extra = {}, force = false) {
@@ -195,7 +209,9 @@ export function onHook(state, input, ctx) {
     start(s, ctx, s.started ? "resume" : "new", out);
     if (!s.stage) enter(s, STAGES.explore, at, out);
   } else if (name === "UserPromptSubmit") {
+    const was = s.started && !s.finished;
     revive(s, ctx, out);
+    if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.explore, at, out);
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     revive(s, ctx, out);
@@ -205,6 +221,7 @@ export function onHook(state, input, ctx) {
     const pushed = PR_CMD.test(cmd) && !didFail;
     const pr = pushed ? prFrom(input.tool_response) : null;
     if (pr) s.prNumber = pr;
+    if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     // A push or PR that failed (no remote, no auth) leaves the card where it was.
     const guess = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
     const stage = guess === STAGES.pr && !pushed ? null : guess;
@@ -256,7 +273,10 @@ export function onReport(state, report, ctx) {
     return { state: s, events: [] };
   }
   const fields = { ...(report.fields ?? {}) };
-  if (report.ticket) s.ticket = report.ticket;
+  if (report.ticket) {
+    s.ticket = report.ticket;
+    s.ticketReported = true;
+  }
   if (report.type === "stage") {
     const skill = report.stage.split(":")[0];
     const moved = skill !== s.skill;
@@ -309,5 +329,23 @@ export function onReport(state, report, ctx) {
       out.push(event(s, report.type, { ...(report.type === "snag.reported" && { stage: s.stage ?? undefined }), ...fields }, at));
     }
   }
+  return { state: s, events: out };
+}
+
+/** How long an agent-lane card may sit with no hook before it shows Waiting for you (CMD-370). */
+export const IDLE_MS = 2 * 3_600_000;
+
+/**
+ * A session no hook has heard from for IDLE_MS: Codex sends nothing when a thread is closed or a turn is interrupted,
+ * so its card would sit in Build or Test and show Stalled. It moves to Waiting for you, which never stalls; the next
+ * prompt moves it on. Skill lanes (ship and the rest) keep their stage: a stalled skill step means something.
+ */
+export function onIdle(state, now) {
+  if (!state?.started || state.finished || state.shipOwned || state.skill !== "agent" || state.stage === STAGES.waiting || now - state.lastSeenAt < IDLE_MS) {
+    return { state, events: [] };
+  }
+  const s = structuredClone(state);
+  const out = [];
+  enter(s, STAGES.waiting, now, out);
   return { state: s, events: out };
 }

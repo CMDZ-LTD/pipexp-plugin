@@ -42,22 +42,37 @@ export async function stagesFor(cwd) {
     const lanes = res.status === 200 ? validLanes(res.body) : null;
     if (lanes) {
       writeJson(cacheFile(repo), { lanes, at: new Date().toISOString() });
+      if (repo && refused(repo)) writeJson(refusedFile(), { ...readJson(refusedFile()), [repo]: undefined });
       return { repo, lanes, from: "board" };
     }
-    if (res.status === 403) return { repo, lanes: null, reason: "this repo has no PipeXP project you can report to" };
+    if (res.status === 403) {
+      markRefused(repo);
+      return { repo, lanes: null, reason: "this repo has no PipeXP project you can report to" };
+    }
   } catch {
     // Offline or slow: the last list, if any.
   }
   return cached ? { repo, lanes: cached.lanes, from: "cache" } : { repo, lanes: null, reason: "the board did not answer" };
 }
 
+const refusedFile = () => join(stateDir(), "stages", "_refused.json");
+const refused = (repo) => !!readJson(refusedFile())?.[repo];
+
+/** The board has no project for this repo that this key can report to: its events go to the key's own project. */
+export function markRefused(repo) {
+  if (!repo) return;
+  try {
+    writeJson(refusedFile(), { ...(readJson(refusedFile()) ?? {}), [repo]: new Date().toISOString() });
+  } catch {}
+}
+
 /**
- * The repo to name on this folder's events: only one the board already accepted for this key (its lanes are cached).
- * Otherwise null and events go to the key's own project, as before, so a repo with no project never loses a report.
+ * The repo to name on this folder's events: its GitHub origin (CMD-370), unless the board refused it for this key.
+ * A refused repo gives null and its events go to the key's own project, as before, so a report is never lost.
  */
 export function routedRepo(cwd) {
   const repo = repoOf(cwd);
-  return repo && readJson(cacheFile(repo))?.lanes ? repo : null;
+  return repo && !refused(repo) ? repo : null;
 }
 
 /** One line per lane, for a person or an agent: "ship (Ship): ship:S0 Check the tools, ship:S8 Review [waits on a person]". */
