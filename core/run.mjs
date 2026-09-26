@@ -12,6 +12,7 @@ import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport } from "./session.mjs";
 import { boardContent, routedRepo } from "./stages.mjs";
+import { markChecked, steerDue } from "./steer.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -66,11 +67,11 @@ function commit(state, events) {
   return events;
 }
 
-/** Starts a flush in its own process group, so it outlives a hook the harness kills. */
-export function kick() {
+/** Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's steers. */
+export function kick(steerFor) {
   if (process.env.PIPEXP_NO_FLUSH) return;
   try {
-    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: process.env }).unref();
+    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: steerFor ? { ...process.env, PIPEXP_STEER_SESSION: steerFor } : process.env }).unref();
   } catch {
     // The next hook tries again.
   }
@@ -118,7 +119,10 @@ export function hook(input, runtime = runtimeOf()) {
   });
   // A new session is when a fixed fault shows: the audit goes now if trust changed or the last one showed a fault.
   if (input.hook_event_name === "SessionStart" && credentials()) queueAudit();
-  if (events.length && credentials()) kick();
+  // A live session asks the board for steers every CHECK_MS, through the detached flush, never in this hook.
+  const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
+  if (steer) markChecked(steer);
+  if ((events.length || steer) && credentials()) kick(steer ?? undefined);
   prune();
   return events;
 }

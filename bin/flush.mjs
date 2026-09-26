@@ -6,7 +6,8 @@ import { checkLatest, noteAudit, noteFlush, queueAudit } from "../core/health.mj
 import { flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
-import { sweepIdle } from "../core/run.mjs";
+import { loadSession, sweepIdle } from "../core/run.mjs";
+import { fetchSteers } from "../core/steer.mjs";
 
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
@@ -32,6 +33,9 @@ export async function run() {
   noteFlush(result);
   // Once a day, whether a newer plugin is out, so status can say when an upgrade would help.
   await checkLatest();
+  // A hook that found this session due a steer check named it here (CMD-80).
+  const steerFor = process.env.PIPEXP_STEER_SESSION;
+  if (steerFor) await fetchSteers(creds, loadSession(steerFor)).catch(() => 0);
   return result;
 }
 
