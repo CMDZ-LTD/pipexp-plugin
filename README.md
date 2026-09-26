@@ -135,6 +135,6 @@ then `codex plugin add pipexp@personal` and start a new session. Never commit th
 `test/version.test.mjs` fails on it.
 
 Release: bump the version in `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `package.json` and `VERSION` in
-`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.4 && git push --tags`). In the same go, set
+`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.5 && git push --tags`). In the same go, set
 `LATEST_PLUGIN` in agent-pipeline `lib/machines.ts` to the new version, so machines behind it show "Update available". Installed copies
 pick it up with `codex plugin marketplace upgrade pipexp`.

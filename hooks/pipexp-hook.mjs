@@ -5,6 +5,7 @@
 import { adapt, noticeOutput } from "../core/adapt.mjs";
 import { hook, runtimeOf } from "../core/run.mjs";
 import { notice } from "../core/connect.mjs";
+import { steerOutput, takeSteers } from "../core/steer.mjs";
 
 let raw = "";
 process.stdout.on("error", () => process.exit(0));
@@ -18,11 +19,13 @@ process.stdin.on("end", () => {
     if (input) {
       hook(input, runtime);
       if (input.hook_event_name === "SessionStart") out = noticeOutput(runtime, notice(runtime));
+      // A note or stop someone sent from the board (CMD-80), fetched earlier by the flush: shown once, here.
+      else if (["UserPromptSubmit", "PostToolUse", "PostToolUseFailure"].includes(input.hook_event_name)) out = steerOutput(runtime, input.hook_event_name, takeSteers(input.session_id));
     }
   } catch {
     // Telemetry never gets in the agent's way.
   }
-  // Stop expects JSON when anything is printed; only SessionStart ever prints, and only a short notice.
+  // Stop expects JSON when anything is printed; only SessionStart (a short notice) and steered tool events print.
   if (out) process.stdout.write(out);
   process.exit(0);
 });
