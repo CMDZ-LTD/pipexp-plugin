@@ -9,7 +9,7 @@ import { RUNTIMES } from "./adapt.mjs";
 import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { onHook, onReport } from "./session.mjs";
+import { onHook, onIdle, onReport } from "./session.mjs";
 import { routedRepo } from "./stages.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
@@ -160,6 +160,28 @@ export function currentSession(cwd = process.cwd(), env = process.env) {
     }
   } catch {}
   return best?.s.sessionId ?? null;
+}
+
+/**
+ * Moves every session no hook has heard from for a while to Waiting for you (session.mjs onIdle). The flush runs it,
+ * so a closed Codex thread's card leaves Build or Test within a flush of the next hook on this machine.
+ */
+export function sweepIdle(now = Date.now()) {
+  let moved = 0;
+  try {
+    for (const name of readdirSync(sessions())) {
+      if (!name.endsWith(".json")) continue;
+      const id = readJson(join(sessions(), name))?.sessionId;
+      if (!id) continue;
+      moved += withSessionLock(id, () => {
+        const { state, events } = onIdle(loadSession(id), now);
+        if (!events.length) return 0;
+        commit(state, events);
+        return 1;
+      });
+    }
+  } catch {}
+  return moved;
 }
 
 // ponytail: sessions untouched for 14 days are deleted on each hook; fine at a few hundred files.
