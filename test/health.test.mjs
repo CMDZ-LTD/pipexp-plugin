@@ -12,7 +12,7 @@ process.env.CODEX_HOME = codex;
 // No real key files: the legacy key lives under the real home folder.
 process.env.HOME = codex;
 const { VERSION, saveCredentials } = await import("../core/config.mjs");
-const { audit, hooksTrusted, problem, queueAudit, tellOnce } = await import("../core/health.mjs");
+const { audit, hooksTrusted, noteAudit, problem, queueAudit, tellOnce } = await import("../core/health.mjs");
 const { hook } = await import("../core/run.mjs");
 const { pending } = await import("../core/queue.mjs");
 const { run: flushNow } = await import("../bin/flush.mjs");
@@ -72,4 +72,19 @@ test("the audit goes out on connect and then once a day with the next flush, and
   assert.equal(audits.length, 1);
   assert.equal(audits[0].body.plugin.hooksTrusted, true);
   assert.ok(JSON.parse(readFileSync(join(home, "state", "flush.json"), "utf8")).sentAt, "the last event time is kept for the next audit");
+});
+
+test("CMD-370: an audit the board refused is sent again an hour later, not a day; a stored one waits a day", async () => {
+  const board = await fakeBoard([400]);
+  saveCredentials({ url: board.url, key: "k".repeat(30) });
+  const T2 = T + 10 * 86_400_000;
+  assert.equal(queueAudit(false, T2), true);
+  await flushNow();
+  assert.equal(queueAudit(false, T2 + 30 * 60_000), false, "not within the hour");
+  assert.equal(queueAudit(false, T2 + 61 * 60_000), true, "refused, so tried again after an hour");
+  await flushNow();
+  assert.equal(queueAudit(false, T2 + 3 * 3_600_000), false, "stored: not again the same day");
+  await board.close();
+  assert.deepEqual(board.requests.filter((r) => r.body.type === "machine.audit").length, 2);
+  noteAudit(true);
 });

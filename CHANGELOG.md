@@ -2,9 +2,18 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## 0.1.5 (unreleased)
+## Unreleased
 
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
+
+## 0.1.5 (2026-09-26)
+
+- Cards say who started them: the machine's GitHub login, read from gh's config (never the network). Minimal content names nobody.
+- A card's ticket, branch and PR follow the branch the session is on now, checked at each prompt and after git switch or checkout. A ticket the agent reported stays until a branch names another.
+- Events name their repo from the git remote at once, so they land in that repo's project. A repo the board refuses is sent again without it and remembered.
+- A refused machine audit is sent again an hour later, not a day, so the Machines tab fills in.
+- A Codex session no hook has heard from for two hours (a closed thread, an interrupted turn) moves to Waiting for you instead of showing Stalled.
+- pipexp_finish refuses a missing outcome instead of queueing an event the board rejects.
 
 ## 0.1.4 (2026-09-26)
 

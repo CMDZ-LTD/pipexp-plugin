@@ -9,6 +9,7 @@ import { disconnected } from "./connect.mjs";
 import { enqueue, pending } from "./queue.mjs";
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 const WORD = /^[0-9A-Za-z.+-]{1,40}$/;
 
 /**
@@ -102,17 +103,30 @@ export function audit(now = Date.now()) {
   };
 }
 
-/** Queues the audit: always on connect (force), else at most once a day. True when it queued one. */
+/**
+ * Queues the audit: always on connect (force), else once a day after the board took one. A refused audit (a board that
+ * did not know the plugin block yet, CMD-370) is tried again an hour later, not a day. True when it queued one.
+ */
 export function queueAudit(force = false, now = Date.now()) {
   const file = join(stateDir(), "audit.json");
-  if (!credentials() || (!force && now - (readJson(file)?.at ?? 0) < DAY)) return false;
+  const last = readJson(file) ?? {};
+  const wait = last.stored === false ? HOUR : DAY;
+  if (!credentials() || (!force && now - (last.at ?? 0) < wait)) return false;
   try {
-    writeJson(file, { at: now });
+    writeJson(file, { at: now, stored: null });
     enqueue(audit(now));
     return true;
   } catch {
     return false;
   }
+}
+
+/** What the board said to the last audit: true stored, false refused. The next audit waits a day only after a stored one. */
+export function noteAudit(stored) {
+  const file = join(stateDir(), "audit.json");
+  try {
+    writeJson(file, { ...(readJson(file) ?? {}), stored });
+  } catch {}
 }
 
 /** Records how a flush went, for the audit's last event and for status. */
