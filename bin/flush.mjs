@@ -6,7 +6,8 @@ import { checkLatest, noteAudit, noteFlush, queueAudit } from "../core/health.mj
 import { flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
-import { loadSession, sweepIdle } from "../core/run.mjs";
+import { hook, loadSession, sweepIdle } from "../core/run.mjs";
+import { lookUpPr } from "../core/pr.mjs";
 import { fetchSteers } from "../core/steer.mjs";
 
 export async function sendOne(creds, event) {
@@ -36,6 +37,14 @@ export async function run() {
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
   if (steerFor) await fetchSteers(creds, loadSession(steerFor)).catch(() => 0);
+  // A hook found this session's PR due a lookup (CMD-427). A new number goes on the card through the session's own
+  // state, as a PrFound hook; that queues the event and starts one more flush to send it.
+  const prFor = process.env.PIPEXP_PR_SESSION;
+  const s = prFor ? loadSession(prFor) : null;
+  if (s) {
+    const number = lookUpPr(s);
+    if (number && number !== s.prNumber) hook({ session_id: prFor, cwd: s.cwd, hook_event_name: "PrFound" }, s.runtime);
+  }
   return result;
 }
 

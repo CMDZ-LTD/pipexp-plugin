@@ -4,6 +4,9 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- A session learns its branch's PR, so its run links to the merge it produced, with no gh pr create needed (CMD-427). The detached flush asks gh (never a hook, at most every ten minutes, at once after a push, never for main), and the PR rides on the run's next step. A session that ended first sends its finish again with the PR. Needs the board to accept prNumber on step.entered.
+- Each run counts the messages a person sent and how many came mid-turn (CMD-428). Counts only: the words are never read, kept or sent. Needs the board to accept humanTurns and interrupts in counters.
+
 ## 0.1.11 (2026-09-26)
 
 - `pipexp preview` prints what this session sends next, exactly as it will go: scrubbed and at the content level (`--all` for every session, `--raw` for JSON). Nothing is sent (CMD-343).

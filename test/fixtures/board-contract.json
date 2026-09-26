@@ -24,7 +24,12 @@
     "occurredAt": "2026-09-25T10:00:00.000Z",
     "skill": "agent",
     "runtime": "codex",
-    "stage": "agent:S2"
+    "stage": "agent:S2",
+    "prNumber": 57,
+    "counters": {
+      "humanTurns": 3,
+      "interrupts": 1
+    }
   },
   "usage.reported": {
     "type": "usage.reported",
@@ -87,7 +92,12 @@
     "rows": [],
     "plugin": {
       "version": "0.1.4",
-      "harnesses": [{ "name": "codex", "version": "0.155.1" }],
+      "harnesses": [
+        {
+          "name": "codex",
+          "version": "0.155.1"
+        }
+      ],
       "hooksTrusted": false,
       "queued": 2,
       "lastError": "hooks_untrusted",

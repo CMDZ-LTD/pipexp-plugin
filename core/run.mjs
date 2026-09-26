@@ -10,7 +10,8 @@ import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { onHook, onIdle, onReport } from "./session.mjs";
+import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
+import { markPrChecked, prDue } from "./pr.mjs";
 import { boardContent, routedRepo } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 
@@ -67,11 +68,15 @@ function commit(state, events) {
   return events;
 }
 
-/** Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's steers. */
-export function kick(steerFor) {
+/**
+ * Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's
+ * steers. prFor: also look up that session's PR (CMD-427).
+ */
+export function kick(steerFor, prFor) {
   if (process.env.PIPEXP_NO_FLUSH) return;
+  const env = { ...process.env, ...(steerFor && { PIPEXP_STEER_SESSION: steerFor }), ...(prFor && { PIPEXP_PR_SESSION: prFor }) };
   try {
-    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: steerFor ? { ...process.env, PIPEXP_STEER_SESSION: steerFor } : process.env }).unref();
+    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env }).unref();
   } catch {
     // The next hook tries again.
   }
@@ -111,18 +116,25 @@ function withSessionLock(id, fn) {
 /** One hook payload in, events queued out. Returns the events (tests read them). */
 export function hook(input, runtime = runtimeOf()) {
   if (!input?.session_id) return [];
+  let after = null;
   const events = withSessionLock(input.session_id, () => {
     const existing = loadSession(input.session_id);
     const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion, Date.now(), input.cwd ?? existing?.cwd);
     const { state, events } = onHook(existing, input, ctx);
+    after = state;
     return commit(state, events);
   });
+  // Whether this session's PR should be looked up (by the flush, never here): a new branch, just after a push, or now
+  // and then while its branch has no PR yet.
+  const pushed = /^PostToolUse/.test(input.hook_event_name ?? "") && PR_CMD.test(commandOf(input.tool_input));
+  const prFor = input.hook_event_name !== "PrFound" && after?.started && !after.shipOwned && credentials() && prDue(input.session_id, after.gitBranch, pushed) ? input.session_id : null;
+  if (prFor) markPrChecked(prFor, after.gitBranch);
   // A new session is when a fixed fault shows: the audit goes now if trust changed or the last one showed a fault.
   if (input.hook_event_name === "SessionStart" && credentials()) queueAudit();
   // A live session asks the board for steers every CHECK_MS, through the detached flush, never in this hook.
   const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
   if (steer) markChecked(steer);
-  if ((events.length || steer) && credentials()) kick(steer ?? undefined);
+  if ((events.length || steer || prFor) && credentials()) kick(steer ?? undefined, prFor ?? undefined);
   prune();
   return events;
 }
