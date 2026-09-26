@@ -44,7 +44,7 @@ function logRefusal(event, status, body) {
   }
 }
 
-/** "sent" | "refused" (drop it) | "retry" (keep it, stop for now). */
+/** "sent" | "refused" (drop it) | "error" (a server error: keep it, one try an hour) | "retry" (unreachable, or the key refused: keep it). */
 export async function post(creds, event) {
   if (event.runId && event.type !== "run.finished" && isCapped(event.runId)) return "refused";
   let res;
@@ -81,7 +81,7 @@ export async function post(creds, event) {
     logRefusal(event, res.status, res.body);
     return "refused";
   }
-  return "retry";
+  return res.status >= 500 ? "error" : "retry";
 }
 
 function markConnected() {

@@ -21,7 +21,7 @@ import { connect, disconnect, saveKey } from "../core/connect.mjs";
 import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
-import { pending, queued } from "../core/queue.mjs";
+import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
 import { contentFor, currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
@@ -32,7 +32,9 @@ const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
 const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
 const EVENTS = ["run.started", "snag.reported", "usage.reported", "run.finished", "gate.checked", "review.done", "pr.status"];
 
-const out = (line) => process.stdout.write(line + "\n");
+const out = (line) => line && process.stdout.write(line + "\n");
+/** "3 min", "5 h", "2 days". */
+const age = (ms) => (ms < 3_600_000 ? Math.max(1, Math.round(ms / 60_000)) + " min" : ms < 172_800_000 ? Math.round(ms / 3_600_000) + " h" : Math.round(ms / 86_400_000) + " days");
 // A reader that stops early (pipexp status | head -1) closes the pipe; that is not an error for a script.
 process.stdout.on("error", () => process.exit(0));
 const fail = (why, code = 2) => {
@@ -55,6 +57,7 @@ const { positionals, values } = parseArgs({
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
+    verbose: { type: "boolean" },
     all: { type: "boolean" },
     background: { type: "boolean" },
     runtime: { type: "string" },
@@ -105,7 +108,8 @@ async function main() {
     // Line one is the whole answer: what is wrong and the fix, or that all is well.
     const p = problem();
     out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
-    out("Queued events: " + pending() + " · pipexp " + VERSION);
+    const w = waiting();
+    out("Queued events: " + w.total + (w.total ? " (oldest " + age(w.oldestMs) + "; pipexp flush --verbose says why)" : "") + " · pipexp " + VERSION);
     out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
@@ -129,7 +133,7 @@ async function main() {
     // Nothing is sent here: the outbox already holds each event as it will go, scrubbed and cut to the content level.
     const id = values.all ? null : (values.session ?? currentSession());
     const runs = id ? new Set(Object.values(loadSession(id)?.runs ?? {}).concat(loadSession(id)?.runId ?? [])) : null;
-    const events = queued().filter((e) => !runs || runs.has(e.runId)).map(({ _usage, ...e }) => (_usage ? { ...e, agents: "(token counts read from the transcript when sent)" } : e));
+    const events = queued().filter((e) => !runs || runs.has(e.runId)).map(({ _usage, _beat, ...e }) => (_usage ? { ...e, agents: "(token counts read from the transcript when sent)" } : e));
     if (values.raw) return out(JSON.stringify(events, null, 2));
     const s = id ? loadSession(id) : null;
     out("Content level: " + contentFor(s?.cwd ?? process.cwd()) + (settingsContent() === "minimal" ? " (this machine)" : ""));
@@ -150,7 +154,16 @@ async function main() {
   }
   if (cmd === "flush") {
     const r = await flushNow();
-    return out("Sent " + r.sent + ", left " + r.left);
+    out("Sent " + r.sent + ", left " + r.left);
+    if (!values.verbose) return;
+    // What still waits, by type and age, and why: types, counts and ages only, never an event's values (CMD-95).
+    const w = waiting();
+    if (w.total) {
+      out(r.stopped === "error" ? "Stopped: the board answered with an error. Tried again at most once an hour, for a day." : r.stopped === "retry" ? "Stopped: the board could not be reached, or refused this machine's key. Nothing is lost: events wait up to 7 days." : r.busy ? "Another flush is sending right now." : "");
+      for (const t of w.byType) out("  " + t.type + ": " + t.count + ", oldest " + age(t.oldestMs));
+    }
+    if (droppedCount()) out(droppedCount() + " dropped before the board took them (over 7 days old, or refused again and again); the next machine audit reports it.");
+    return;
   }
   if (cmd === "stage") {
     if (!STAGE.test(arg ?? "")) fail("stage looks like ship:S4 or agent:S2");

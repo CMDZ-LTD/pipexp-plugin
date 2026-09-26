@@ -4,6 +4,8 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- Never lose a session on a flaky network (CMD-95). The outbox keeps events for 7 days instead of 500 events, and a board that answers with a server error costs one try an hour (up to 24), so a day-long outage loses nothing. While waiting, a stage's repeated heartbeats and a run's back-to-back usage snapshots merge, so the queue stays small. Anything dropped anyway is counted and reported in the next machine audit (needs the board to accept plugin.dropped). pipexp flush --verbose lists what waits by type and age, and why it stopped; pipexp status says how old the oldest is. Types and ages only, never values.
+
 ## 0.1.12 (2026-09-26)
 
 - Restart on another model from the board (CMD-80), off until this machine's owner runs `pipexp allow restart` (`pipexp deny restart` turns it off; `pipexp status` says which). Only the owner of this machine's key can ask. The run's turn ends, and a new run starts on the same ticket and a listed model, in the same folder and the same sandbox or permission mode (refused if that cannot be read), from a fixed prompt and an args list with no shell. It links back with parentRunId, and the old run's card logs it.

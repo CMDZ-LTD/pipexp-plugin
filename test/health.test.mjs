@@ -57,7 +57,8 @@ test("the audit carries versions, trust, queue and an error code only, in the bo
   hook({ session_id: "h-1", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
   const a = audit(T);
   assert.deepEqual(Object.keys(a).sort(), Object.keys(fixture).sort());
-  assert.deepEqual(Object.keys(a.plugin).sort(), Object.keys(fixture.plugin).sort());
+  // dropped goes only when something was dropped (CMD-95): every other field always goes.
+  assert.deepEqual(Object.keys(a.plugin).sort(), Object.keys(fixture.plugin).filter((k) => k !== "dropped").sort());
   assert.equal(a.plugin.version, VERSION);
   assert.deepEqual(a.plugin.harnesses.map((h) => h.name), ["codex"]);
   assert.equal(a.plugin.hooksTrusted, false);
