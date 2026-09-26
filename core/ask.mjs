@@ -15,15 +15,19 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
   const creds = credentials();
   if (!creds) return { status: "failed", reason: "PipeXP is not connected (run pipexp connect)" };
   let id = questionId;
+  let repo = loadSession(sessionId)?.repo ?? null;
   if (!id) {
     if (!question?.trim()) return { status: "failed", reason: "the question is empty" };
     let s = loadSession(sessionId);
     // The question hangs off this session's card, so the run must exist on the board first.
     if (!s?.started || s.finished) s = report(sessionId, { type: "run.started", fields: {} }).state;
+    repo = s.repo ?? null;
     id = randomUUID();
     const body = {
       questionId: id,
       runId: s.runId,
+      // The run's repo, as on its events, so the question lands in the run's project.
+      ...(s.repo && { repo: s.repo }),
       ...(s.ticket && { ticket: s.ticket }),
       question: scrub(question).slice(0, 1000),
       ...(context && { context: scrub(context).slice(0, 2000) }),
@@ -47,7 +51,7 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
     const left = Math.max(1, Math.min(POLL_S, Math.floor((until - Date.now()) / 1000)));
     let got;
     try {
-      got = await call(creds, "/questions/" + id + "?wait=" + left, {}, (left + 10) * 1000);
+      got = await call(creds, "/questions/" + id + "?wait=" + left + (repo ? "&repo=" + encodeURIComponent(repo) : ""), {}, (left + 10) * 1000);
     } catch {
       got = null;
     }

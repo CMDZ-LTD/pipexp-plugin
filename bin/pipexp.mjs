@@ -2,6 +2,7 @@
 // pipexp: connect this machine, check status, and report from skills and scripts.
 //   pipexp connect [--key-stdin]        connect this machine (device sign-in; --key-stdin reads a /setup key)
 //   pipexp status                        connection, queue and this session's run
+//   pipexp stages [--raw]                this repo's lanes and stage ids on the board (--raw: JSON)
 //   pipexp disconnect                    forget this machine's key
 //   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
@@ -21,6 +22,7 @@ import { pending } from "../core/queue.mjs";
 import { currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
+import { describe, stagesFor } from "../core/stages.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
 const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
@@ -48,6 +50,7 @@ const { positionals, values } = parseArgs({
     "timeout-min": { type: "string" },
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
+    raw: { type: "boolean" },
     background: { type: "boolean" },
     runtime: { type: "string" },
     claim: { type: "string" },
@@ -94,6 +97,11 @@ async function main() {
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
+  if (cmd === "stages") {
+    const r = await stagesFor(process.cwd());
+    if (!r.lanes) return fail("no stages: " + r.reason, 1);
+    return out(values.raw ? JSON.stringify({ repo: r.repo, lanes: r.lanes }) : describe(r.lanes) + (r.from === "cache" ? "\n(from the last time the board answered)" : ""));
+  }
   if (cmd === "disconnect") return out(disconnect() ? "Disconnected. The key is deleted from this machine; revoke it at https://pipexp.dev/setup." : "Not connected.");
   if (cmd === "content") {
     if (!["standard", "minimal"].includes(arg)) fail("content is standard or minimal");
@@ -130,7 +138,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

@@ -6,6 +6,7 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending } from "../core/queue.mjs";
 import { currentSession, loadSession, report } from "../core/run.mjs";
+import { describe, stagesFor } from "../core/stages.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
 const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
@@ -76,6 +77,11 @@ const TOOLS = [
     },
   },
   {
+    name: "pipexp_stages",
+    description: "This repo's lanes and stage ids on the PipeXP board. Call once at session start when you run a skill with stages, and report only stage ids it lists.",
+    inputSchema: { type: "object", properties: { ...where } },
+  },
+  {
     name: "pipexp_status",
     description: "Whether this machine is connected to PipeXP, what is queued, and this session's run on the board.",
     inputSchema: { type: "object", properties: { ...where } },
@@ -84,7 +90,8 @@ const TOOLS = [
 
 // Every tool only reports to this person's own PipeXP board or reads status: nothing is deleted, and the only
 // system touched is that one board (a closed world). Honest annotations let Codex run them without a prompt.
-for (const tool of TOOLS) tool.annotations = { readOnlyHint: tool.name === "pipexp_status", destructiveHint: false, openWorldHint: false, idempotentHint: tool.name === "pipexp_status" };
+const READS = ["pipexp_status", "pipexp_stages"];
+for (const tool of TOOLS) tool.annotations = { readOnlyHint: READS.includes(tool.name), destructiveHint: false, openWorldHint: false, idempotentHint: READS.includes(tool.name) };
 
 // Codex starts this server in the plugin's folder with a bare environment (no thread id, no PWD), so there the
 // agent's cwd finds its session. Claude Code gives the server CLAUDE_CODE_SESSION_ID, which wins when no cwd is
@@ -95,6 +102,11 @@ const ok = (value) => ({ content: [{ type: "text", text: typeof value === "strin
 const err = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
 async function callTool(name, args = {}) {
+  if (name === "pipexp_stages") {
+    const r = await stagesFor(args.cwd);
+    if (!r.lanes) return err("No stages: " + r.reason + ". Report agent:S1 to agent:S4 as usual.");
+    return ok({ repo: r.repo, from: r.from, lanes: r.lanes, summary: describe(r.lanes) });
+  }
   if (name === "pipexp_status") {
     const c = credentials();
     const id = sessionOf(args);
