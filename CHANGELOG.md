@@ -6,6 +6,10 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 
+## 0.1.8 (2026-09-26)
+
+- The Machines tab catches up at once when a fault clears: a fresh audit goes when hook trust changes or a fault the last audit showed has gone, checked at every session start and flush, not once a day (CMD-370).
+
 ## 0.1.7 (2026-09-26)
 
 - A finish stays on the board: after pipexp_finish, the rest of that turn's tool calls and its end no longer reopen the card (a finish was undone 144 ms later). The next prompt starts it again.
