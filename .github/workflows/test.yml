@@ -6,7 +6,8 @@ on:
 jobs:
   test:
     # Self-hosted Linux runners. Back to GitHub's own: ubuntu-latest.
-    runs-on: [self-hosted, m4]
+    # Any PipeXP runner: omarchy's native ones, or the M4's Docker ones (agent-pipeline docs/ci-runners.md).
+    runs-on: [self-hosted, pipexp]
     strategy:
       matrix:
         node: [18, 22]
