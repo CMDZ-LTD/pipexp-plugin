@@ -145,7 +145,9 @@ async function callTool(name, args = {}) {
   if (name === "pipexp_ask_human") {
     const r = await ask({ sessionId: id, question: args.question, context: args.context, options: args.options, timeoutMin: args.timeout_min ?? 60, questionId: args.question_id, wait: ASK_WAIT_S });
     if (r.status === "answered") return ok({ status: "answered", answer: r.answer, answered_by: r.answeredBy });
-    if (r.status === "waiting") return ok({ status: "waiting", question_id: r.questionId, next: "No answer yet. Call pipexp_ask_human again with this question_id to keep waiting." });
+    if (r.status === "waiting") {
+      return ok({ status: "waiting", question_id: r.questionId, link: r.link, next: "No answer yet. Share the link in the chat if the person is here, then call pipexp_ask_human again with this question_id to keep waiting." });
+    }
     return err((r.reason ?? "No answer") + ". Ask in the chat instead.");
   }
   return err("Unknown tool " + name);

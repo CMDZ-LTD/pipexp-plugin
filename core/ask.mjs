@@ -7,14 +7,19 @@ import { scrub } from "./scrub.mjs";
 
 const POLL_S = 20;
 
+/** The board page with this question open on its own: tap an option there to answer. */
+export const questionLink = (boardUrl, questionId) => (boardUrl || "https://pipexp.dev").replace(/\/+$/, "") + "/?question=" + encodeURIComponent(questionId);
+
 /**
  * wait: "all" waits until answered or timed out (CLI); a number waits at most that many seconds and returns
- * { status: "waiting", questionId } so an MCP call can come back and wait again.
+ * { status: "waiting", questionId, link } so an MCP call can come back and wait again.
+ * onAsked(link): called once the board has the question, before waiting, so the link can be shared at once.
  */
-export async function ask({ sessionId, question, context, options, timeoutMin = 60, questionId, wait = "all" }) {
+export async function ask({ sessionId, question, context, options, timeoutMin = 60, questionId, wait = "all", onAsked }) {
   const creds = credentials();
   if (!creds) return { status: "failed", reason: "PipeXP is not connected (run pipexp connect)" };
   let id = questionId;
+  const link = () => questionLink(creds.boardUrl, id);
   let repo = loadSession(sessionId)?.repo ?? null;
   if (!id) {
     if (!question?.trim()) return { status: "failed", reason: "the question is empty" };
@@ -44,6 +49,7 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
       return { status: "failed", reason: "board unreachable (" + (e.cause?.code ?? e.name) + ")" };
     }
     if (asked.status !== 201 && asked.status !== 200) return { status: "failed", reason: "the board refused the question (HTTP " + asked.status + ")" };
+    onAsked?.(link());
   }
   const until = wait === "all" ? Date.now() + timeoutMin * 60_000 + 30_000 : Date.now() + wait * 1000;
   let misses = 0;
@@ -62,8 +68,8 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
     }
     misses = 0;
     if (got.status !== 200) return { status: "failed", questionId: id, reason: "the board refused the poll (HTTP " + got.status + ")" };
-    if (got.body?.status === "answered") return { status: "answered", questionId: id, answer: got.body.answer, answeredBy: got.body.answeredBy };
-    if (got.body?.status === "expired") return { status: "expired", questionId: id, reason: "nobody answered in time" };
+    if (got.body?.status === "answered") return { status: "answered", questionId: id, answer: got.body.answer, answeredBy: got.body.answeredBy, link: link() };
+    if (got.body?.status === "expired") return { status: "expired", questionId: id, reason: "nobody answered in time", link: link() };
   }
-  return wait === "all" ? { status: "expired", questionId: id, reason: "nobody answered in time" } : { status: "waiting", questionId: id };
+  return wait === "all" ? { status: "expired", questionId: id, reason: "nobody answered in time", link: link() } : { status: "waiting", questionId: id, link: link() };
 }
