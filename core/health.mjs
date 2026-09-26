@@ -86,7 +86,7 @@ export function refusedLine(r, latest = latestKnown()) {
   const what = "The board refused a " + r.type + " event (" + r.status + (r.field ? ", field " + r.field : "") + ") at " + r.at.slice(11, 16) + " UTC.";
   return behind(latest)
     ? what + " Fix: a newer plugin is out (" + latest + "): codex plugin marketplace upgrade pipexp"
-    : what + " This plugin (" + VERSION + ") is the newest, so an upgrade will not fix it: tell whoever runs the board, with that line.";
+    : what + (latest ? " This plugin (" + VERSION + ") is the newest, so an upgrade will not fix it" : " No newer plugin is known") + ": tell whoever runs the board, with that line.";
 }
 
 /** The one thing to fix first, as { code, line }, or null when all is well. */

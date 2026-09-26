@@ -99,11 +99,12 @@ test("CMD-370: a refusal names the event and the board's reason, and says an upg
   const p = problem(T);
   assert.equal(p.code, "event_refused");
   assert.match(p.line, /^The board refused a run\.finished event \(400, field outcome\) at 08:45 UTC\./);
-  // No newer release known (never read, or this is the newest): no upgrade advice.
-  assert.doesNotMatch(p.line, /marketplace upgrade/);
-  assert.match(p.line, new RegExp("This plugin \\(" + VERSION.replace(/\./g, "\\.") + "\\) is the newest"));
+  // Never read the tags: no upgrade advice, and no claim to be the newest.
+  assert.doesNotMatch(p.line, /marketplace upgrade|is the newest/);
   writeFileSync(join(state, "latest.json"), JSON.stringify({ at: T, version: VERSION }));
+  // This is the newest: still no upgrade advice, and it says so.
   assert.doesNotMatch(problem(T).line, /marketplace upgrade/);
+  assert.match(problem(T).line, new RegExp("This plugin \\(" + VERSION.replace(/\./g, "\\.") + "\\) is the newest"));
   // Older than a day: nothing to say.
   assert.equal(problem(T + 86_400_000)?.code ?? null, null);
 });
@@ -127,3 +128,10 @@ test("CMD-370: status suggests an upgrade only when the newest release tag is ah
   writeFileSync(join(state, "errors.log"), "");
 });
 
+
+test("review: before the release tags are read, status does not claim this plugin is the newest", async () => {
+  const { refusedLine } = await import("../core/health.mjs");
+  const r = { at: "2026-09-26T12:30:55.612Z", type: "run.finished", status: 400, field: "outcome" };
+  assert.doesNotMatch(refusedLine(r, null), /is the newest|upgrade/);
+  assert.match(refusedLine(r, null), /No newer plugin is known: tell whoever runs the board/);
+});
