@@ -134,7 +134,8 @@ async function main() {
     return;
   }
   if (cmd === "ask") {
-    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || 60, questionId: values["question-id"], wait: "all" });
+    // The link goes to stderr at once, so a person nearby can answer before the wait ends; stdout stays the answer.
+    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || 60, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
