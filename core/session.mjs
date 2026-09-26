@@ -10,7 +10,9 @@ const BEAT_MS = 30 * 60_000;
 const DWELL_MS = 60_000;
 const FAILS_FOR_SNAG = 3;
 
-const EDIT_TOOLS = /^(apply_patch|Edit|Write|MultiEdit|NotebookEdit)$/;
+// Edit tools by agent: Codex apply_patch; Claude Code and Cursor Edit, Write, MultiEdit, StrReplace; Gemini CLI
+// write_file, replace; OpenCode edit, write, patch.
+const EDIT_TOOLS = /^(apply_patch|Edit|Write|MultiEdit|NotebookEdit|StrReplace|write_file|replace|edit|write|patch)$/;
 const PR_CMD = /\bgh\s+pr\s+(create|ready)\b|\bgit\s+push\b/;
 const TEST_CMD =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|typecheck|lint|build|check|e2e)\b|\b(npx\s+)?(vitest|jest|pytest|playwright|mocha|tsc|eslint|rspec|phpunit)\b|\bcargo\s+(test|check|clippy|build)\b|\bgo\s+(test|vet|build)\b|\b(gradle|mvn|dotnet)\s+test\b|\bnode\s+--test\b|\bmake\s+(test|check)\b/;
@@ -47,11 +49,12 @@ export function stageForTool(name, input) {
 
 const text = (v) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v));
 const prFrom = (response) => Number(text(response).match(/github\.com\/[^/\s"]+\/[^/\s"]+\/pull\/(\d+)/)?.[1]) || null;
-// Best effort: harnesses print exit codes differently. Unknown counts as a pass.
+// Best effort: each agent reports exit codes its own way (Codex/Claude "exit_code", Cursor "exitCode", Gemini
+// "Exit Code: N" text, OpenCode "exit"). Unknown counts as a pass.
 const failed = (response) => {
   const t = text(response);
-  const code = t.match(/"exit_code"\s*:\s*(-?\d+)|exit(?:ed with)? code:?\s*(-?\d+)|Exit code:?\s*(-?\d+)/i);
-  return code ? Number(code[1] ?? code[2] ?? code[3]) !== 0 : false;
+  const code = t.match(/"(?:exit_code|exitCode|exit)"\s*:\s*(-?\d+)|exit(?:ed with)? code:?\s*(-?\d+)/i);
+  return code ? Number(code[1] ?? code[2]) !== 0 : false;
 };
 
 export function newState(input, ctx) {
@@ -97,7 +100,7 @@ function event(s, type, fields, at) {
 /** A usage.reported the sender fills in from the transcript, so a hook never reads big files. */
 const usageMarker = (s, stage, at) => ({
   ...event(s, "usage.reported", { stage: stage ?? undefined }, at),
-  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt },
+  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt, ...(s.reported && { reported: s.reported }) },
 });
 
 function startFields(s, ctx, claim) {
@@ -165,6 +168,8 @@ export function onHook(state, input, ctx) {
   s.lastSeenAt = at;
   if (input.transcript_path) s.transcriptPath = input.transcript_path;
   if (input.cwd) s.cwd = input.cwd;
+  // An agent with no transcript (OpenCode) sends its own running token total with its hooks.
+  if (input.pipexp_usage && typeof input.pipexp_usage === "object") s.reported = { ...input.pipexp_usage, startedAt: s.startedAt };
   // Claude Code writes its version into the transcript after the first prompt, so SessionStart may not see it yet.
   // Once it appears, the run's start is sent again (same run, "resume") so the card shows it.
   const version = s.runtimeVersion ?? ctx.runtimeVersion ?? ctx.probe.runtimeVersion?.(s.runtime, s.transcriptPath);

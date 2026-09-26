@@ -9,7 +9,7 @@ import { usage } from "../core/usage.mjs";
 export async function sendOne(creds, event) {
   if (!event._usage) return post(creds, event);
   const { _usage: u, ...rest } = event;
-  const agents = usage({ since: u.since, runtime: u.runtime, session: u.session, transcriptPath: u.transcriptPath });
+  const agents = usage({ since: u.since, runtime: u.runtime, session: u.session, transcriptPath: u.transcriptPath, reported: u.reported });
   // No usage to report (no transcript, nothing since the start): nothing to send.
   if (!agents.length) return "refused";
   return post(creds, { ...rest, agents });

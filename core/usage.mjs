@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 const MAX_AGENTS = 50;
 const HEAD_BYTES = 512 * 1024;
-const VERSION = /^(codex|claude) [0-9A-Za-z.+-]{1,40}$/;
+const VERSION = /^[a-z][a-z0-9-]{1,19} (?=[0-9A-Za-z.+-]*\d)[0-9A-Za-z.+-]{1,40}$/;
 
 const effortOf = (e) => (EFFORTS.includes(e) ? e : "unknown");
 const iso = (ms) => new Date(ms).toISOString();
@@ -341,6 +341,59 @@ function claude({ since, session, transcriptPath, claudeHome, configuredEffort }
 }
 
 /**
+ * Gemini CLI: one JSONL transcript per session (the hook gives its path). A message is written again each time it
+ * changes, so only the last copy of each id counts. "gemini" messages carry model and tokens
+ * {input, output, cached, thoughts, tool, total}. Gemini's input already includes the cached part.
+ */
+function gemini({ since, session, transcriptPath }) {
+  if (!transcriptPath) return [];
+  const rows = lines(transcriptPath);
+  const byId = new Map();
+  for (const r of rows) if (r?.type === "gemini" && r.id) byId.set(r.id, r);
+  const inWindow = [...byId.values()].filter((r) => !(timeOf(r) < since));
+  if (!inWindow.length) return [];
+  const tokens = { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
+  for (const { tokens: t } of inWindow) {
+    if (!t) continue;
+    tokens.input += (t.input ?? 0) + (t.tool ?? 0);
+    tokens.cachedInput += t.cached ?? 0;
+    tokens.output += t.output ?? 0;
+    tokens.reasoning += t.thoughts ?? 0;
+  }
+  const times = inWindow.map(timeOf).filter(Number.isFinite);
+  const start = times.length ? Math.min(...times) : since;
+  const meta = rows.find((r) => r?.sessionId && r?.startTime) ?? {};
+  return [{
+    agentId: String(session ?? meta.sessionId ?? "gemini").slice(0, 100),
+    parentAgentId: null,
+    role: "main",
+    model: String(inWindow.findLast((r) => r.model)?.model ?? "unknown").slice(0, 60),
+    effort: "unknown",
+    effortSource: "observed",
+    tokens,
+    wallSeconds: times.length ? Math.round((Math.max(...times) - start) / 1000) : 0,
+    startedAt: iso(start),
+  }];
+}
+
+/** Usage an agent's own plugin counted and sent (OpenCode), shaped like the rest. */
+function reportedAgent(session, r) {
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? Math.round(v) : 0);
+  return {
+    agentId: String(session ?? "session").slice(0, 100),
+    parentAgentId: null,
+    role: "main",
+    model: String(r.model ?? "unknown").slice(0, 60),
+    effort: "unknown",
+    effortSource: "observed",
+    tokens: { input: n(r.input), cachedInput: n(r.cachedInput), output: n(r.output), reasoning: n(r.reasoning) },
+    wallSeconds: n(r.wallSeconds),
+    startedAt: typeof r.startedAt === "string" ? r.startedAt : iso(Date.now()),
+  };
+}
+
+
+/**
  * The board's usage.reported agents for one run: root first, the rest by startedAt, at most 50.
  * since: ms epoch or ISO string. runtime: "codex" | "claude". session: the thread/session id.
  * transcriptPath: the root transcript, used directly when given. configuredEffort: (role) => effort
@@ -354,12 +407,15 @@ export function usage({
   codexHome = process.env.CODEX_HOME || join(homedir(), ".codex"),
   claudeHome = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
   configuredEffort,
+  reported,
 } = {}) {
   try {
     const from = typeof since === "number" ? since : Date.parse(since ?? "");
     if (!Number.isFinite(from)) return [];
     const opts = { since: from, session, transcriptPath, codexHome, claudeHome, configuredEffort };
-    const agents = (runtime === "codex" ? codex(opts) : runtime === "claude" ? claude(opts) : []).filter(Boolean);
+    // Gemini CLI writes a JSONL transcript; OpenCode's plugin totals its own messages and sends them (reported).
+    const agents = (runtime === "codex" ? codex(opts) : runtime === "claude" ? claude(opts) : runtime === "gemini" ? gemini(opts)
+      : reported ? [reportedAgent(session, reported)] : []).filter(Boolean);
     const [head, ...rest] = agents;
     if (!head) return [];
     rest.sort((a, b) => a.startedAt.localeCompare(b.startedAt));

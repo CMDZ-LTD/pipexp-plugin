@@ -108,7 +108,9 @@ test("the hook command names its harness, so Claude and Codex never mix up", () 
   // One hooks file for both harnesses: Claude Code loads hooks/hooks.json AND a manifest hooks file, so a second
   // file would send every event twice (seen live, 26 Sep 2026).
   const hooks = JSON.parse(readFileSync(new URL("../hooks/hooks.json", import.meta.url), "utf8")).hooks;
-  for (const [event, [group]] of Object.entries(hooks)) assert.equal(group.hooks[0].command, 'node "$' + '{CLAUDE_PLUGIN_ROOT}/hooks/pipexp-hook.mjs"', event);
+  // Codex and Claude Code events; Gemini CLI's own (BeforeAgent, AfterTool, AfterAgent) are in agents.test.mjs.
+  for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"])
+    assert.equal(hooks[event][0].hooks[0].command, 'node "$' + '{CLAUDE_PLUGIN_ROOT}/hooks/pipexp-hook.mjs"', event);
   assert.ok(hooks.PostToolUseFailure, "failed tool calls are reported");
   const manifest = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"));
   assert.equal(manifest.hooks, undefined, "no second hooks file");
