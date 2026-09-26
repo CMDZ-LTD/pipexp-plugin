@@ -322,3 +322,12 @@ test("CMD-370: after a finish, that turn's tool calls and its end leave the card
   const next = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 60 * MIN));
   assert.deepEqual(brief(next.events).slice(0, 1), ["run.started"]);
 });
+
+test("the board contract has run.started with ticket: null, which only run.started may send (CMD-452, board #344)", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"));
+  const none = fixtures["run.started (no ticket)"];
+  assert.equal(none.type, "run.started");
+  assert.equal(none.ticket, null);
+  assert.deepEqual({ ...none, ticket: undefined, eventId: undefined }, { ...fixtures["run.started"], ticket: undefined, eventId: undefined });
+  assert.ok(Object.entries(fixtures).every(([k, e]) => k === "run.started (no ticket)" || e.ticket !== null), "no other event sends ticket: null");
+});

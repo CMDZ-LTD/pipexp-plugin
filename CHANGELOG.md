@@ -4,6 +4,8 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- The board contract fixture has a run.started with ticket: null, which board #344 accepts: a session whose branch has no ticket now can drop the card's old one. The plugin does not send it yet (CMD-452).
+
 ## 0.1.11 (2026-09-26)
 
 - `pipexp preview` prints what this session sends next, exactly as it will go: scrubbed and at the content level (`--all` for every session, `--raw` for JSON). Nothing is sent (CMD-343).
