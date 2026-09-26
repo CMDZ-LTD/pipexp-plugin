@@ -4,6 +4,7 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- Status says which event the board refused and its 400 reason, and suggests an upgrade only when a newer release is out (CMD-370).
 - Tools find the session from a git worktree the session did not start in: by the Codex thread id, else by the one session in another worktree of the same repo; the error names the folder it looked in (CMD-370).
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 

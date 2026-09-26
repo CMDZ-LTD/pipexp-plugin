@@ -2,7 +2,7 @@
 // Sends the outbox. Started detached by every hook; also "pipexp flush". Fills in usage.reported from the
 // transcript just before sending, so hooks never read big files. Silent: never prints, always exits 0.
 import { credentials } from "../core/config.mjs";
-import { noteAudit, noteFlush, queueAudit } from "../core/health.mjs";
+import { checkLatest, noteAudit, noteFlush, queueAudit } from "../core/health.mjs";
 import { flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
@@ -30,6 +30,8 @@ export async function run() {
   sweepIdle();
   const result = await flush((event) => sendOne(creds, event));
   noteFlush(result);
+  // Once a day, whether a newer plugin is out, so status can say when an upgrade would help.
+  await checkLatest();
   return result;
 }
 
