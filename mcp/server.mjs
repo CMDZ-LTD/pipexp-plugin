@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // PipeXP's MCP server (stdio, newline-delimited JSON-RPC, no dependencies). Thin: every tool calls the same
 // core the hooks and the CLI use. The session is found from cwd (the agent's working folder) unless given.
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
@@ -55,7 +57,7 @@ const TOOLS = [
       type: "object",
       properties: {
         outcome: { type: "string", enum: ["ready", "merged", "blocked", "abandoned"] },
-        pr_number: { type: "number" },
+        pr_number: { type: "number", description: "The PR this work opened, if any (prNumber and pr are accepted too)" },
         question: { type: "string", description: "For blocked: what a person must decide" },
         ...where,
       },
@@ -118,6 +120,26 @@ const noSession = (args) => {
 const ok = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const err = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
+const OUTCOMES = ["ready", "merged", "blocked", "abandoned"];
+// What agents pass instead of the real names (CMD-370): the board event's own names, and what reads naturally.
+const FINISH_HINTS = { status: "outcome", state: "outcome", result: "outcome", pull_request: "pr_number", pullRequest: "pr_number" };
+const FINISH_ARGS = new Set(["outcome", "pr_number", "prNumber", "pr", "question", "cwd", "session_id", "ticket"]);
+
+/** Why these pipexp_finish arguments cannot make a run.finished the board accepts, or null. Never a silent drop. */
+export function finishProblem(args) {
+  const unknown = Object.keys(args).filter((k) => !FINISH_ARGS.has(k));
+  if (unknown.length) {
+    return unknown.map((k) => "unknown field " + k + (FINISH_HINTS[k] ? "; use " + FINISH_HINTS[k] : "")).join(". ") +
+      ". pipexp_finish takes outcome (ready, merged, blocked or abandoned), pr_number, question, cwd and session_id.";
+  }
+  if (!OUTCOMES.includes(args.outcome)) return "outcome is required: ready, merged, blocked or abandoned" + (args.outcome === undefined ? "" : " (got " + JSON.stringify(args.outcome).slice(0, 40) + ")");
+  const prs = ["pr_number", "prNumber", "pr"].filter((k) => args[k] !== undefined && args[k] !== null);
+  if (prs.length > 1 && new Set(prs.map((k) => args[k])).size > 1) return "pass the PR once: " + prs.join(" and ") + " differ";
+  const pr = prs.length ? args[prs[0]] : null;
+  if (pr !== null && !(Number.isInteger(pr) && pr > 0)) return "pr_number is the PR's number, like 42";
+  return null;
+}
+
 async function callTool(name, args = {}) {
   if (name === "pipexp_stages") {
     const r = await stagesFor(args.cwd);
@@ -156,12 +178,17 @@ async function callTool(name, args = {}) {
     return ok("Snag recorded.");
   }
   if (name === "pipexp_finish") {
-    if (!["ready", "merged", "blocked", "abandoned"].includes(args.outcome)) return err("outcome is ready, merged, blocked or abandoned");
+    const bad = finishProblem(args);
+    if (bad) return err(bad);
     const fields = { outcome: args.outcome };
-    if (typeof args.pr_number === "number") fields.prNumber = args.pr_number;
+    const pr = args.pr_number ?? args.prNumber ?? args.pr;
+    if (pr !== undefined && pr !== null) fields.prNumber = pr;
     if (args.question) fields.question = args.question;
-    report(id, { type: "run.finished", fields }, undefined, args.cwd);
-    return ok("Marked " + args.outcome + ".");
+    const { events } = report(id, { type: "run.finished", fields }, undefined, args.cwd);
+    // What was recorded, read back from the event itself, so a dropped PR number shows at once.
+    const sent = events.find((e) => e.type === "run.finished");
+    if (!sent) return err("Nothing recorded: this session is reported by the repo's ship scripts.");
+    return ok("Marked " + sent.outcome + ", " + (sent.prNumber ? "PR #" + sent.prNumber : "no PR") + ".");
   }
   if (name === "pipexp_ask_human") {
     const r = await ask({ sessionId: id, question: args.question, context: args.context, options: args.options, timeoutMin: args.timeout_min ?? 60, questionId: args.question_id, wait: ASK_WAIT_S });
@@ -196,7 +223,8 @@ async function handle(msg) {
   send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } });
 }
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+// Only as the server itself: tests import finishProblem without starting it.
+if (import.meta.url === pathToFileURL(realpathSync(process.argv[1] ?? "")).href) createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
   let msg;
   try {

@@ -214,6 +214,9 @@ export function onHook(state, input, ctx) {
     if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.explore, at, out);
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
+    // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
+    // Done (CMD-370: a finish was undone 144 ms later). The next prompt, or an explicit report, brings it back.
+    if (s.finished) return { state: s, events: [] };
     revive(s, ctx, out);
     const cmd = commandOf(input.tool_input);
     // Claude Code sends a failed tool call as its own event (PostToolUseFailure, with "error"), Codex inside the response.
@@ -237,6 +240,8 @@ export function onHook(state, input, ctx) {
         out.push(event(s, "snag.reported", { stage: s.stage ?? undefined, kind: "snag", theme: "checks failing", what: "The same checks failed " + FAILS_FOR_SNAG + " times in a row: " + cmd.slice(0, 200), costMin: null }, at));
     }
   } else if (name === "Stop") {
+    // The turn that finished the card ends: nothing to add.
+    if (s.finished) return { state: s, events: [] };
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);

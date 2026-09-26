@@ -1,6 +1,6 @@
 {
   "name": "pipexp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Reports every coding-agent session to your PipeXP board: stage, time, tokens, snags and questions for a person.",
   "author": {
     "name": "CMDZ",
