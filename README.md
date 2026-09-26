@@ -83,6 +83,7 @@ Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`,
 
 ```text
 pipexp connect | status | disconnect | flush | content standard|minimal
+pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'
 pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]

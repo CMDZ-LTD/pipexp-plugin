@@ -10,6 +10,7 @@ import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onReport } from "./session.mjs";
+import { routedRepo } from "./stages.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -48,11 +49,13 @@ export function context(runtime, transcriptPath, known, now = Date.now()) {
   };
 }
 
-/** Writes the events to the outbox (scrubbed) and saves the state. */
+/** Writes the events to the outbox (scrubbed) and saves the state. Events name the repo once the board knows it. */
 function commit(state, events) {
   mkdirSync(sessions(), { recursive: true, mode: 0o700 });
+  // Rechecked until known: the board learns the repo the first time pipexp_stages (or pipexp stages) reads it.
+  if (!state.repo && state.cwd) state.repo = routedRepo(state.cwd);
   writeJson(sessionFile(state.sessionId), state);
-  if (events.length) enqueue(...events.map(scrubEvent));
+  if (events.length) enqueue(...events.map((e) => scrubEvent(state.repo && !e.repo ? { ...e, repo: state.repo } : e)));
   return events;
 }
 
