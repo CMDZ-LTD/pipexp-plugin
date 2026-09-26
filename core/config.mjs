@@ -1,11 +1,12 @@
 // Where pipexp keeps its files and how it finds its key. Everything lives under ~/.config/pipexp
 // (PIPEXP_HOME overrides it), so Codex, Claude Code and the MCP server on one machine share one connection.
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform, release } from "node:os";
 import { join } from "node:path";
 
-export const VERSION = "0.1.6";
+export const VERSION = "0.1.7";
 // PIPEXP_HOME moves everything (tests). Codex starts MCP servers with a bare environment, so the MCP server
 // always uses the default folder: keep real connections in credentials.json, not in env.
 export const home = () => process.env.PIPEXP_HOME || join(homedir(), ".config", "pipexp");
@@ -54,15 +55,35 @@ export function credentials() {
 
 export const saveCredentials = (value) => writeJson(join(home(), "credentials.json"), value);
 
+const shortHost = () => hostname().replace(/\.(local|lan)$/i, "");
+
+/**
+ * A first name for a new machine (CMD-370): the Mac's own Computer Name ("Derek's MacBook Pro"), else the hostname.
+ * Two Macs set up from one backup share a Computer Name, and the board would show both the same, so the hostname is
+ * added when it differs from the name. PIPEXP_MACHINE_NAME, or a name in machine.json, always wins.
+ */
+export function defaultName(computerName = macComputerName(), host = shortHost()) {
+  const name = (computerName || "").replace(/[\u2018\u2019]/g, "'").trim();
+  if (!name) return host;
+  const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return slug(name) === slug(host) ? name : name + " (" + host + ")";
+}
+function macComputerName() {
+  if (platform() !== "darwin") return null;
+  const r = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
 /** This machine's id and name, made once. Reuses the id an older ship skill made (the same legacy folder), so the board keeps one machine. */
 export function machine() {
   const path = join(home(), "machine.json");
   const mine = readJson(path);
-  if (mine?.id) return mine;
+  // PIPEXP_MACHINE_NAME names it outright; else the name in machine.json, which a person may edit.
+  if (mine?.id) return process.env.PIPEXP_MACHINE_NAME ? { ...mine, name: process.env.PIPEXP_MACHINE_NAME } : mine;
   const old = readJson(join(homedir(), ".config", "nudj", "machine.json"));
   const made = {
     id: old?.id ?? randomUUID(),
-    name: old?.name ?? (process.env.PIPEXP_MACHINE_NAME || hostname().replace(/\.(local|lan)$/i, "")),
+    name: process.env.PIPEXP_MACHINE_NAME || old?.name || defaultName(),
     createdAt: new Date().toISOString(),
   };
   try {

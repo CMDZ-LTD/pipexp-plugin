@@ -6,6 +6,13 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 
+## 0.1.7 (2026-09-26)
+
+- A finish stays on the board: after pipexp_finish, the rest of that turn's tool calls and its end no longer reopen the card (a finish was undone 144 ms later). The next prompt starts it again.
+- pipexp_finish takes prNumber and pr as well as pr_number, refuses any other field with what to use ("unknown field status; use outcome"), and answers with what it recorded: "Marked ready, PR #355" or "Marked ready, no PR".
+- The pipexp shim runs the newest installed version, so an upgrade that deletes the old folder no longer breaks scripts that call it.
+- A new Mac is named after its Computer Name, with the hostname when they differ; PIPEXP_MACHINE_NAME and a name set in machine.json win.
+
 ## 0.1.6 (2026-09-26)
 
 - Status says which event the board refused and its 400 reason, and suggests an upgrade only when a newer release is out (CMD-370).

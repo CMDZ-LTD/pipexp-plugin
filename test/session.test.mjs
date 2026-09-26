@@ -310,3 +310,15 @@ test("CMD-370: a session no hook has heard from for two hours waits for its pers
   const back = onHook(idle.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 4 * 60 * MIN));
   assert.deepEqual(brief(back.events).filter((e) => e.startsWith("step")), ["step.entered agent:S1"]);
 });
+
+test("CMD-370: after a finish, that turn's tool calls and its end leave the card at Done; the next prompt reopens it", () => {
+  const s = play([[0, { hook_event_name: "UserPromptSubmit" }], [1, { hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }]]).state;
+  const done = onReport(s, { type: "run.finished", fields: { outcome: "ready", prNumber: 343 } }, ctx(T0 + 2 * MIN));
+  assert.equal(done.events.at(-1).outcome, "ready");
+  const tool = onHook(done.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }, ctx(T0 + 2 * MIN + 144));
+  assert.deepEqual(tool.events, [], "144 ms later: nothing");
+  const stop = onHook(tool.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN));
+  assert.deepEqual(stop.events, []);
+  const next = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 60 * MIN));
+  assert.deepEqual(brief(next.events).slice(0, 1), ["run.started"]);
+});
