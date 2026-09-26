@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { credentials, machine, osName, readJson, stateDir, underTest, VERSION, writeJson } from "./config.mjs";
 import { disconnected } from "./connect.mjs";
 import { enqueue, pending } from "./queue.mjs";
+import { restartAllowed } from "./restart.mjs";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -139,6 +140,8 @@ export function audit(now = Date.now()) {
       queued: pending(),
       lastError: problem(now)?.code ?? null,
       lastEventAt: flushNote().sentAt ?? null,
+      // Whether the board may restart this machine's runs (CMD-80): the card greys Restart out where it is off.
+      canRestart: restartAllowed(),
     },
   };
 }

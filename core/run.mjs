@@ -13,6 +13,7 @@ import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport } from "./session.mjs";
 import { routedRepo } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
+import { restartPlan, startRestart } from "./restart.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -47,6 +48,9 @@ export function context(runtime, transcriptPath, known, now = Date.now()) {
     // Read once per session: the first line of a Codex transcript can be tens of KB.
     runtimeVersion: known ?? probe.runtimeVersion(runtime, transcriptPath),
     content: settings().content === "minimal" ? "minimal" : "standard",
+    // Set by a restart for the new session it starts (core/restart.mjs).
+    parentRunId: process.env.PIPEXP_PARENT_RUN || null,
+    ticket: process.env.PIPEXP_TICKET || null,
     probe,
   };
 }
@@ -207,6 +211,34 @@ export function sweepIdle(now = Date.now()) {
     }
   } catch {}
   return moved;
+}
+
+/**
+ * Carries out a restart the board sent for this session (CMD-80), from the steers the flush just fetched: the same
+ * steer also sits in the inbox for the hook to end the turn with, and the new run starts here, once per steer id. Refused ones are logged on the old run as a snag, so the
+ * card says why nothing started.
+ */
+export function carryOutRestarts(sessionId, steers, start = startRestart) {
+  const s = loadSession(sessionId);
+  if (!s || !Array.isArray(steers)) return 0;
+  const done = new Set(s.restarted ?? []);
+  let started = 0;
+  for (const steer of steers.filter((w) => w.kind === "restart")) {
+    // One run per steer: by its id (an older board sends none: then model and message).
+    const key = steer.steerId ?? steer.model + "|" + steer.message;
+    if (done.has(key)) continue;
+    done.add(key);
+    const plan = restartPlan(s, steer);
+    const pid = plan.why ? null : start(plan, join(stateDir(), "restart-" + s.runId + ".log"));
+    const why = plan.why ?? (pid ? null : "the " + plan.file + " command could not be started on this machine");
+    report(sessionId, { type: "snag.reported", fields: { kind: why ? "snag" : "worked", theme: "restart", what: why ? "Restart on " + steer.model + " refused: " + why : "Restarted on " + steer.model + " in the same folder and mode", costMin: null } }, s.runtime, s.cwd);
+    if (!why) started++;
+  }
+  withSessionLock(sessionId, () => {
+    const now = loadSession(sessionId);
+    if (now) writeJson(sessionFile(sessionId), { ...now, restarted: [...done].slice(-20) });
+  });
+  return started;
 }
 
 // ponytail: sessions untouched for 14 days are deleted on each hook; fine at a few hundred files.

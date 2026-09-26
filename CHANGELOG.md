@@ -4,6 +4,10 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+## 0.1.12 (2026-09-26)
+
+- Restart on another model from the board (CMD-80), off until this machine's owner runs `pipexp allow restart` (`pipexp deny restart` turns it off; `pipexp status` says which). Only the owner of this machine's key can ask. The run's turn ends, and a new run starts on the same ticket and a listed model, in the same folder and the same sandbox or permission mode (refused if that cannot be read), from a fixed prompt and an args list with no shell. It links back with parentRunId, and the old run's card logs it.
+
 ## 0.1.10 (2026-09-26)
 
 - Notes and stops sent from a card on the board reach the running session (CMD-80). A note arrives as context on the next tool call, or at the turn's end (the agent goes on with it). A stop ends the turn with who stopped it and why, and an agent-lane card moves to Waiting for you. Ship and other skill runs keep their stage.
