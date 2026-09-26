@@ -114,7 +114,8 @@
       "hooksTrusted": false,
       "queued": 2,
       "lastError": "hooks_untrusted",
-      "lastEventAt": "2026-09-26T08:00:00.000Z"
+      "lastEventAt": "2026-09-26T08:00:00.000Z",
+      "canRestart": false
     }
   }
 }

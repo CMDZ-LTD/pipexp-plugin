@@ -8,6 +8,7 @@ import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
 import { loadSession, sweepIdle } from "../core/run.mjs";
 import { fetchSteers } from "../core/steer.mjs";
+import { carryOutRestarts } from "../core/run.mjs";
 
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
@@ -35,7 +36,11 @@ export async function run() {
   await checkLatest();
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
-  if (steerFor) await fetchSteers(creds, loadSession(steerFor)).catch(() => 0);
+  if (steerFor) {
+    // The steers just fetched, straight to the restart: never re-read from the inbox a hook may take in between.
+    const fresh = await fetchSteers(creds, loadSession(steerFor)).catch(() => []);
+    carryOutRestarts(steerFor, fresh);
+  }
   return result;
 }
 

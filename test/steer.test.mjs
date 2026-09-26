@@ -33,7 +33,7 @@ test("the flush fetches a live session's steers on its machine key, and the next
   saveCredentials({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) });
   hook({ session_id: "s-1", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
   const s = loadSession("s-1");
-  assert.equal(await fetchSteers({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) }, s), 1);
+  assert.equal((await fetchSteers({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) }, s)).length, 1);
   await b.close();
   const steer = b.seen.find((r) => r.url.startsWith("/steer"));
   assert.equal(steer.url, "/steer?runId=" + s.runId);
@@ -77,10 +77,10 @@ test("a session asks the board at most every 30 seconds, and a finished or ship-
   markChecked("s-3", now);
   assert.equal(steerDue("s-3", now + 10_000), false);
   assert.equal(steerDue("s-3", now + 31_000), true);
-  assert.equal(await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s", finished: true }), 0);
-  assert.equal(await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s", shipOwned: true }), 0);
+  assert.equal((await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s", finished: true })).length, 0);
+  assert.equal((await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s", shipOwned: true })).length, 0);
   // The board down: nothing, no throw.
-  assert.equal(await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s" }), 0);
+  assert.equal((await fetchSteers({ url: "http://127.0.0.1:9", key: "k" }, { runId: "r", sessionId: "s" })).length, 0);
   void home;
 });
 
@@ -124,10 +124,18 @@ test("review: a steer the board sends again (its reply was lost) is shown once, 
   const creds = { url: "http://127.0.0.1:" + server.address().port, key: "pipexp_rk_" + "k".repeat(43) };
   hook({ session_id: "s-ack", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
   const s = loadSession("s-ack");
-  assert.equal(await fetchSteers(creds, s), 1);
-  assert.equal(await fetchSteers(creds, s), 0, "the same id again: not shown twice");
+  assert.equal((await fetchSteers(creds, s)).length, 1);
+  assert.equal((await fetchSteers(creds, s)).length, 0, "the same id again: not shown twice");
   await new Promise((r) => server.close(r));
   assert.doesNotMatch(seen[0], /ack=/);
   assert.match(seen[1], new RegExp("&ack=" + ID));
   assert.equal(takeSteers("s-ack").length, 1);
+});
+
+test("a restart from the board ends this turn like a stop; the flush starts the new run", () => {
+  const RESTART = { kind: "restart", model: "gpt-6-sol", message: "Restarted on gpt-6-sol from the PipeXP board by sam@orbit.test. Do not call more tools; end your turn: a new run on gpt-6-sol carries on." };
+  const out = JSON.parse(steerOutput("codex", "PostToolUse", [RESTART]));
+  assert.equal(out.continue, false);
+  assert.equal(out.stopReason, RESTART.message);
+  assert.equal(steerOutput("codex", "Stop", [RESTART]), "", "at the turn's end it just ends");
 });
