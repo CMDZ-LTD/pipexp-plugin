@@ -4,6 +4,8 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- pipexp status names the newest release and how old that knowledge is. A release list read before this plugin was tagged is read again within the hour, so status no longer calls an old release the newest (CMD-370).
+
 ## 0.1.11 (2026-09-26)
 
 - `pipexp preview` prints what this session sends next, exactly as it will go: scrubbed and at the content level (`--all` for every session, `--raw` for JSON). Nothing is sent (CMD-343).
