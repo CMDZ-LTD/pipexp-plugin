@@ -4,6 +4,8 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- A session start says, once a day, when events are waiting on a board it can't reach or the board refused one, with the fix (CMD-88). Before, you found out only when a card was missing. Connecting and a refused key were already said.
+
 - pipexp ask prints the question's own link (`Answer it here: <board>/?question=<id>`) as soon as the board has it, and pipexp_ask_human returns it while waiting, so a person nearby can answer in one tap (CMD-77).
 
 ## 0.1.12 (2026-09-26)

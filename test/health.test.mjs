@@ -1,5 +1,6 @@
 // The machine's own health: the one-line status, the daily audit the Machines tab reads, and the untrusted-hooks line.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -164,4 +165,26 @@ test("CMD-370: after a fault the last audit showed clears, the next SessionStart
   // All clean now: another session sends no audit.
   hook({ session_id: "trust-2", cwd: "/repo", hook_event_name: "SessionStart" }, "codex");
   assert.equal(audits().length, before + 1);
+});
+
+test("CMD-88: a session start says once a day when events wait on a board it cannot reach, or the board refused one, with the fix", async () => {
+  const { startNotice } = await import("../core/health.mjs");
+  const { enqueue } = await import("../core/queue.mjs");
+  config(true);
+  saveCredentials({ url: "http://127.0.0.1:9", key: "k".repeat(30) });
+  writeFileSync(join(home, "state", "errors.log"), "");
+  writeFileSync(join(home, "state", "disconnected.json"), "null");
+  const now = Date.now();
+  assert.equal(startNotice(now), "", "all well: nothing to say");
+  // A flush left events behind: the board could not be reached.
+  enqueue({ eventId: "00000000-0000-4000-8000-000000000888", runId: "88888888-8888-4888-8888-888888888888", type: "step.entered" });
+  writeFileSync(join(home, "state", "flush.json"), JSON.stringify({ at: now, left: 1 }));
+  assert.equal(startNotice(now), "PipeXP: Events are waiting: the board could not be reached. Fix: check the network, then run pipexp flush");
+  assert.equal(startNotice(now + 60_000), "", "once a day");
+  // Through the real hook, as the agent shows it: the next day, a session start carries it as its notice.
+  const launcher = new URL("../hooks/pipexp-hook.mjs", import.meta.url).pathname;
+  writeFileSync(join(home, "state", "start-notice.json"), JSON.stringify({ board_unreachable: now - 2 * 86_400_000 }));
+  const run = spawnSync(process.execPath, [launcher, "--runtime", "codex"], { input: JSON.stringify({ session_id: "notice-88", cwd: "/repo", hook_event_name: "SessionStart", source: "startup" }), env: { ...process.env, PIPEXP_NO_FLUSH: "1" }, encoding: "utf8", timeout: 5000 });
+  assert.match(JSON.parse(run.stdout).systemMessage, /board could not be reached\. Fix: check the network, then run pipexp flush$/);
+  writeFileSync(join(home, "state", "flush.json"), JSON.stringify({ at: now, left: 0 }));
 });

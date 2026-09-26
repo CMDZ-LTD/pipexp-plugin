@@ -185,6 +185,23 @@ export function noteFlush(result, now = Date.now()) {
   } catch {}
 }
 
+/**
+ * What a session start tells the person about sending, beyond connecting (connect.mjs notice): events waiting on a board
+ * it cannot reach, or an event the board refused, with the fix. Once a day for each (CMD-88), so a board that is down
+ * is known at the next session, not when a card turns out to be missing. Empty when all is well.
+ */
+export function startNotice(now = Date.now()) {
+  const p = problem(now);
+  if (!p || (p.code !== "board_unreachable" && p.code !== "event_refused")) return "";
+  const file = join(stateDir(), "start-notice.json");
+  const told = readJson(file) ?? {};
+  if (now - (told[p.code] ?? 0) < DAY) return "";
+  try {
+    writeJson(file, { ...told, [p.code]: now });
+  } catch {}
+  return "PipeXP: " + p.line;
+}
+
 /** The untrusted-hooks line, at most once a day: a session whose hooks do not run has no other way to hear it. */
 export function tellOnce(now = Date.now()) {
   if (hooksTrusted() !== false) return "";
