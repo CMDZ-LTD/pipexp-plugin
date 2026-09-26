@@ -41,7 +41,9 @@ export async function stagesFor(cwd) {
     const res = await call(creds, "/plugin/config" + (repo ? "?repo=" + encodeURIComponent(repo) : ""), { method: "GET" });
     const lanes = res.status === 200 ? validLanes(res.body) : null;
     if (lanes) {
-      writeJson(cacheFile(repo), { lanes, at: new Date().toISOString() });
+      // The project's content level (CMD-343): minimal on the board beats standard here.
+      const contentLevel = res.body.contentLevel === "minimal" ? "minimal" : "standard";
+      writeJson(cacheFile(repo), { lanes, contentLevel, at: new Date().toISOString() });
       if (repo && refused(repo)) writeJson(refusedFile(), { ...readJson(refusedFile()), [repo]: undefined });
       return { repo, lanes, from: "board" };
     }
@@ -73,6 +75,12 @@ export function markRefused(repo) {
 export function routedRepo(cwd) {
   const repo = repoOf(cwd);
   return repo && !refused(repo) ? repo : null;
+}
+
+/** The content level the board set for this folder's project (cached from /plugin/config), or null if never read. */
+export function boardContent(cwd) {
+  const level = readJson(cacheFile(repoOf(cwd)))?.contentLevel;
+  return level === "minimal" || level === "standard" ? level : null;
 }
 
 /** One line per lane, for a person or an agent: "ship (Ship): ship:S0 Check the tools, ship:S8 Review [waits on a person]". */
