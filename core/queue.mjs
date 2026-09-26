@@ -47,6 +47,17 @@ function drop(name) {
 
 export const pending = () => names().length;
 
+/** The events waiting to be sent, oldest first, exactly as they will go (already scrubbed): pipexp preview reads them. */
+export function queued() {
+  const out = [];
+  for (const name of names()) {
+    try {
+      out.push(JSON.parse(readFileSync(join(outbox(), name), "utf8")).event);
+    } catch {}
+  }
+  return out;
+}
+
 /** One flush at a time per machine: a lock file, taken over when older than a minute. */
 function lock() {
   const path = join(stateDir(), "flush.lock");

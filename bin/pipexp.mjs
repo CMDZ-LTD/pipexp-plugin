@@ -9,6 +9,7 @@
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
+//   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
 //   pipexp uninstall cursor              take PipeXP out of Cursor's hooks
@@ -20,9 +21,9 @@ import { connect, disconnect, saveKey } from "../core/connect.mjs";
 import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
-import { pending } from "../core/queue.mjs";
+import { pending, queued } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
-import { currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { contentFor, currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
@@ -54,6 +55,7 @@ const { positionals, values } = parseArgs({
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
+    all: { type: "boolean" },
     background: { type: "boolean" },
     runtime: { type: "string" },
     claim: { type: "string" },
@@ -71,6 +73,7 @@ const parse = (s, what) => {
   // JSON.parse quotes what it rejects, which may hold a secret: never echo it.
   return fail(what + " is not a JSON object");
 };
+const settingsContent = () => readJson(join(home(), "settings.json"))?.content;
 const session = () => values.session ?? currentSession() ?? fail("no session found; pass --session <id>");
 
 async function main() {
@@ -122,6 +125,19 @@ async function main() {
       ? "Restart is on: the owner of this machine's key can restart its runs on another model from the board, in the same folder and mode."
       : "Restart is off on this machine.");
   }
+  if (cmd === "preview") {
+    // Nothing is sent here: the outbox already holds each event as it will go, scrubbed and cut to the content level.
+    const id = values.all ? null : (values.session ?? currentSession());
+    const runs = id ? new Set(Object.values(loadSession(id)?.runs ?? {}).concat(loadSession(id)?.runId ?? [])) : null;
+    const events = queued().filter((e) => !runs || runs.has(e.runId)).map(({ _usage, ...e }) => (_usage ? { ...e, agents: "(token counts read from the transcript when sent)" } : e));
+    if (values.raw) return out(JSON.stringify(events, null, 2));
+    const s = id ? loadSession(id) : null;
+    out("Content level: " + contentFor(s?.cwd ?? process.cwd()) + (settingsContent() === "minimal" ? " (this machine)" : ""));
+    if (!events.length) return out(id ? "Nothing waiting for this session: everything so far has been sent." : "Nothing waiting to be sent.");
+    out(events.length + " event" + (events.length > 1 ? "s" : "") + " waiting" + (id ? " for this session" : "") + ", as they will be sent:");
+    for (const e of events) out(JSON.stringify(e));
+    return;
+  }
   if (cmd === "disconnect") return out(disconnect() ? "Disconnected. The key is deleted from this machine; revoke it at https://pipexp.dev/setup." : "Not connected.");
   if (cmd === "content") {
     if (!["standard", "minimal"].includes(arg)) fail("content is standard or minimal");
@@ -158,7 +174,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

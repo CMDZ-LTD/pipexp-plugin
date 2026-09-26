@@ -1,14 +1,15 @@
 // Redacts secrets, home folders, machine and customer identifiers from free text before it leaves the machine.
-// Ported from a ship skill's telemetry sender, plus the board's key shapes (lib/questions.ts). nudj_rk_ is the
-// board's older key prefix: keys of that shape still exist, so they are redacted too.
+// Ported from a ship skill's telemetry sender, plus the board's key shapes (lib/questions.ts). pipexp_rk_ is today's
+// key prefix; nudj_rk_ is the board's older one, and keys of that shape still exist, so both are redacted.
+// test/redaction.test.mjs runs this on the board's own cases (agent-pipeline lib/redaction-fixtures.json).
 const TOKENS = [
   /eyJ[\w-]+\.[\w-]+\.[\w-]+/g,
   /\b[a-f0-9]{32,}\b/gi,
   // A long run is a key, unless it reads like a path or branch slug (words joined by / or -).
   [/\b[A-Za-z0-9_+/-]{40,}={0,2}/g, (m) => !/[/-]/.test(m) || (/[a-z]/.test(m) && /[A-Z]/.test(m) && /\d/.test(m))],
-  /\b(?:sk|pk|rk)_(?:live|test)_\w+|\bgh[pousr]_\w+|\bgithub_pat_\w+|\bxox[abprs]-[\w-]+|\blin_api_\w+|\bnudj_rk_[\w-]+|\bpxp_[\w-]+|\bAKIA\w{12,}|\bAIza[\w-]{20,}|\bsk-[\w-]{16,}/g,
+  /\b(?:sk|pk|rk)_(?:live|test)_\w+|\bgh[pousr]_\w+|\bgithub_pat_\w+|\bxox[abprs]-[\w-]+|\blin_api_\w+|\bpipexp_rk_[\w-]+|\bnudj_rk_[\w-]+|\bpxp_[\w-]+|\bAKIA\w{12,}|\bAIza[\w-]{20,}|\bsk-[\w-]{16,}/g,
   /-----BEGIN [A-Z ]+-----[\s\S]*?(?:-----END [A-Z ]+-----|$)/g,
-  /(:\/\/)[^\s/:@]+:[^\s/@]+@/g,
+  /(:\/\/)[^\s/:@]+:[^\s/@]+(?=@)/g,
   /[\w.+-]+@[\w-]+\.[\w.-]+/g,
   /\b([A-Z][A-Z0-9_]{2,}=)\S+/g,
   /\b(Bearer\s+)\S+/gi,

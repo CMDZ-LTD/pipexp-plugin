@@ -10,7 +10,7 @@ test("secrets never leave the machine: keys, tokens, JWTs, env values, passwords
     ["key ghp_" + "a".repeat(36), "key [REDACTED]"],
     ["pipexp nudj_rk_" + "Ab1-".repeat(10), "pipexp [REDACTED]"],
     ["env MONGODB_URI=mongodb+srv://u:p@x/y", "env MONGODB_URI=[REDACTED]"],
-    ["db mongodb+srv://admin:hunter2@cluster0.example.net/app", "db mongodb+srv://[REDACTED]cluster0.example.net/app"],
+    ["db mongodb+srv://admin:hunter2@cluster0.example.net/app", "db mongodb+srv://[REDACTED]@cluster0.example.net/app"],
     ["pw password: hunter2", "pw password: [REDACTED]"],
     ["sent " + jwt, "sent [REDACTED]"],
     ["-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "[REDACTED]"],
