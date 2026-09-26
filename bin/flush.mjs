@@ -37,8 +37,9 @@ export async function run() {
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
   if (steerFor) {
-    await fetchSteers(creds, loadSession(steerFor)).catch(() => 0);
-    carryOutRestarts(steerFor);
+    // The steers just fetched, straight to the restart: never re-read from the inbox a hook may take in between.
+    const fresh = await fetchSteers(creds, loadSession(steerFor)).catch(() => []);
+    carryOutRestarts(steerFor, fresh);
   }
   return result;
 }

@@ -22,19 +22,20 @@ const seenIds = (sessionId) => {
 };
 
 /**
- * Asks the board for this run's waiting steers and adds new ones to the session's inbox. The board keeps each steer
+ * Asks the board for this run's waiting steers, adds new ones to the session's inbox, and returns them (the flush
+ * carries out a restart from this list, not from the inbox, which a hook may take meanwhile). The board keeps each steer
  * waiting until the machine acknowledges its id, so a lost reply loses nothing; this call acknowledges what it
  * already holds, and skips a repeat by id. Quietly does nothing on failure.
  */
 export async function fetchSteers(creds, session) {
-  if (!session?.runId || session.shipOwned || session.finished) return 0;
+  if (!session?.runId || session.shipOwned || session.finished) return [];
   const seen = seenIds(session.sessionId);
   let res;
   try {
     const q = "?runId=" + encodeURIComponent(session.runId) + (session.repo ? "&repo=" + encodeURIComponent(session.repo) : "") + (seen.length ? "&ack=" + seen.slice(-20).join(",") : "");
     res = await call(creds, "/steer" + q, { method: "GET" }, 4000);
   } catch {
-    return 0;
+    return [];
   }
   const got = Array.isArray(res?.body?.steers)
     ? res.body.steers.filter((s) => (s.kind === "note" || s.kind === "stop" || (s.kind === "restart" && typeof s.model === "string")) && typeof s.message === "string")
@@ -48,7 +49,7 @@ export async function fetchSteers(creds, session) {
       writeFileSync(seenFile(session.sessionId), JSON.stringify([...new Set([...seen, ...ids])].slice(-40)), { mode: 0o600 });
     } catch {}
   }
-  if (!fresh.length) return 0;
+  if (!fresh.length) return [];
   try {
     mkdirSync(inbox(), { recursive: true, mode: 0o700 });
     const file = fileOf(session.sessionId);
@@ -60,7 +61,7 @@ export async function fetchSteers(creds, session) {
     writeFileSync(tmp, JSON.stringify([...waiting, ...fresh].slice(-10)), { mode: 0o600 });
     renameSync(tmp, file);
   } catch {}
-  return fresh.length;
+  return fresh;
 }
 
 /** True when these steers include a stop: the hook then moves the card to Waiting for you. */

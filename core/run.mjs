@@ -214,19 +214,18 @@ export function sweepIdle(now = Date.now()) {
 }
 
 /**
- * Carries out a restart the board sent for this session (CMD-80): the steer stays in the inbox for the hook to end the
- * turn with, and the new run starts here, once per steer. Refused ones are logged on the old run as a snag, so the
+ * Carries out a restart the board sent for this session (CMD-80), from the steers the flush just fetched: the same
+ * steer also sits in the inbox for the hook to end the turn with, and the new run starts here, once per steer id. Refused ones are logged on the old run as a snag, so the
  * card says why nothing started.
  */
-export function carryOutRestarts(sessionId, start = startRestart) {
+export function carryOutRestarts(sessionId, steers, start = startRestart) {
   const s = loadSession(sessionId);
-  if (!s) return 0;
-  const inboxFile = join(stateDir(), "steers", String(sessionId).replace(/[^\w.-]/g, "_").slice(0, 120) + ".json");
-  const waiting = readJson(inboxFile) ?? [];
+  if (!s || !Array.isArray(steers)) return 0;
   const done = new Set(s.restarted ?? []);
   let started = 0;
-  for (const steer of waiting.filter((w) => w.kind === "restart")) {
-    const key = steer.model + "|" + steer.message;
+  for (const steer of steers.filter((w) => w.kind === "restart")) {
+    // One run per steer: by its id (an older board sends none: then model and message).
+    const key = steer.steerId ?? steer.model + "|" + steer.message;
     if (done.has(key)) continue;
     done.add(key);
     const plan = restartPlan(s, steer);

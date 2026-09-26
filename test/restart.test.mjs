@@ -86,20 +86,17 @@ test("the new run links to the one it replaced (parentRunId) and keeps the ticke
 
 test("a fetched restart starts once, is logged on the old run, and a refused one says why", () => {
   hook({ session_id: "s-live", cwd: folder, hook_event_name: "UserPromptSubmit", transcript_path: transcript([codexTurn("workspace-write", "on-request")]) }, "codex");
-  const inbox = join(home, "state", "steers");
-  mkdirSync(inbox, { recursive: true });
-  writeFileSync(join(inbox, "s-live.json"), JSON.stringify([STEER]));
   const starts = [];
   const fake = (plan) => (starts.push(plan), 777);
-  assert.equal(carryOutRestarts("s-live", fake), 1);
-  assert.equal(carryOutRestarts("s-live", fake), 0, "the same steer never starts two runs");
+  const one = { ...STEER, steerId: "5c0a9f1e-1b2c-4d3e-8f40-5a6b7c8d9e01" };
+  assert.equal(carryOutRestarts("s-live", [one], fake), 1);
+  assert.equal(carryOutRestarts("s-live", [one], fake), 0, "the same steer never starts two runs");
   assert.equal(starts.length, 1);
   assert.deepEqual(starts[0].args.slice(0, 3), ["exec", "--model", "gpt-6-sol"]);
   assert.equal(loadSession("s-live").restarted.length, 1);
   // Off: nothing starts.
   setRestart(false);
-  writeFileSync(join(inbox, "s-live.json"), JSON.stringify([{ ...STEER, model: "gpt-5.5", message: "again" }]));
-  assert.equal(carryOutRestarts("s-live", fake), 0);
+  assert.equal(carryOutRestarts("s-live", [{ ...STEER, steerId: "5c0a9f1e-1b2c-4d3e-8f40-5a6b7c8d9e02", model: "gpt-5.5" }], fake), 0);
   assert.equal(starts.length, 1);
   setRestart(true);
 });
@@ -113,3 +110,27 @@ test("the machine audit tells the board whether Restart is on here", async () =>
   assert.ok(RESTART_MODELS.codex.includes("gpt-6-sol"));
 });
 
+
+test("review: a restart still starts when the agent's hook takes the inbox between the fetch and the carry-out", async () => {
+  const { createServer } = await import("node:http");
+  const { fetchSteers, takeSteers } = await import("../core/steer.mjs");
+  const ID = "5c0a9f1e-1b2c-4d3e-8f40-5a6b7c8d9e03";
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ steers: [{ steerId: ID, kind: "restart", model: "gpt-6-sol", message: "Restarted on gpt-6-sol from the PipeXP board by sam@orbit.test." }] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const creds = { url: "http://127.0.0.1:" + server.address().port, key: "pipexp_rk_" + "k".repeat(43) };
+  hook({ session_id: "s-race", cwd: folder, hook_event_name: "UserPromptSubmit", transcript_path: transcript([codexTurn("workspace-write", "on-request")]) }, "codex");
+  const fresh = await fetchSteers(creds, loadSession("s-race"));
+  await new Promise((r) => server.close(r));
+  // The agent's next hook runs now: it takes the inbox and is told a new run carries on.
+  assert.equal(takeSteers("s-race").length, 1);
+  const starts = [];
+  assert.equal(carryOutRestarts("s-race", fresh, (plan) => (starts.push(plan), 4242)), 1, "the new run starts anyway");
+  assert.deepEqual(starts[0].args.slice(0, 3), ["exec", "--model", "gpt-6-sol"]);
+  assert.deepEqual(loadSession("s-race").restarted, [ID]);
+  // Two restarts to the same model by the same person are told apart by their ids.
+  assert.equal(carryOutRestarts("s-race", [{ ...fresh[0], steerId: "5c0a9f1e-1b2c-4d3e-8f40-5a6b7c8d9e04" }], (plan) => (starts.push(plan), 4243)), 1);
+  assert.equal(starts.length, 2);
+});
