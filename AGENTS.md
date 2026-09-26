@@ -25,7 +25,8 @@ Codex first, Claude Code next, then other harnesses. Derek (CMDZ CEO, dyslexic: 
 
 - Events: `POST <ingest>/events` with `x-api-key`; schema is agent-pipeline `lib/event-schema.ts` (strict: unknown
   fields are refused). `test/fixtures/board-contract.json` mirrors agent-pipeline `lib/plugin-contract.test.ts`; change both together.
-- Lanes and stages come from `GET <ingest>/plugin/config`. The plugin's own lane is `agent` (S1 Explore to S5 Waiting for you).
+- Lanes and stages come from `GET <ingest>/plugin/config?repo=owner/name` (the project's own, set in the board's Settings > Pipeline; `core/stages.mjs`, cached per repo). The plugin's own lane is `agent` (S1 Explore to S5 Waiting for you). `test/fixtures/plugin-config.json` mirrors the board's answer.
+- Once the board has served a repo's stages, events and questions from that folder carry `repo`, so they land in that repo's project; before that they go to the key's own project.
 - Connect: `POST /device/code` and `POST /device/token` (RFC 8628), page `pipexp.dev/connect` (agent-pipeline PR #69).
   Questions: `POST /questions`, `GET /questions/<id>?wait=20`.
 - Ingest URL today is the Convex site (prod `exciting-ox-380`, set as `DEFAULT_URL` in `core/connect.mjs`).
