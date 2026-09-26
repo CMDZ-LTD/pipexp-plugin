@@ -22,6 +22,13 @@ your turn ends. Do nothing for that. Use the tools below only to add what hooks 
 
 Always pass `cwd` (your working folder) so the report lands on this session's card.
 
+## Notes and stops from the board
+
+A person can send you a note or stop you from your card. It arrives as context at your next step, starting
+"Note from ... on the PipeXP board" or "Stopped from the PipeXP board by ...". Treat a note like a message from
+the user. On a stop, call no more tools: end your turn, say in one line that you were stopped from the board and
+why, and report `pipexp_finish` with outcome `blocked`.
+
 ## Stages come from the board
 
 Each project sets its lanes and stages in PipeXP (Settings > Pipeline), and a repo can suggest its own in
