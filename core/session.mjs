@@ -113,6 +113,8 @@ function startFields(s, ctx, claim) {
     machineId: ctx.machineId,
     pluginVersion: "pipexp " + VERSION,
     runtimeVersion: s.runtimeVersion,
+    // Cursor keeps no token counts on the machine: the board says "Tokens not reported", never 0.
+    ...(s.runtime === "cursor" && { tokensReported: false }),
     ...s.fields,
   };
 }
