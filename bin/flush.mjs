@@ -8,6 +8,7 @@ import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
 import { loadSession, sweepIdle } from "../core/run.mjs";
 import { fetchSteers } from "../core/steer.mjs";
+import { stagesFor } from "../core/stages.mjs";
 import { carryOutRestarts } from "../core/run.mjs";
 
 export async function sendOne(creds, event) {
@@ -41,6 +42,8 @@ export async function run() {
     const fresh = await fetchSteers(creds, loadSession(steerFor)).catch(() => []);
     carryOutRestarts(steerFor, fresh);
   }
+  // A session started where this machine's copy of the lanes is old or missing (CMD-421): read them again.
+  if (process.env.PIPEXP_STAGES_CWD) await stagesFor(process.env.PIPEXP_STAGES_CWD).catch(() => null);
   return result;
 }
 

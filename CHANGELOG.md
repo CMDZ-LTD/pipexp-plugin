@@ -4,6 +4,9 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
+- Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
+
 ## 0.1.12 (2026-09-26)
 
 - Restart on another model from the board (CMD-80), off until this machine's owner runs `pipexp allow restart` (`pipexp deny restart` turns it off; `pipexp status` says which). Only the owner of this machine's key can ask. The run's turn ends, and a new run starts on the same ticket and a listed model, in the same folder and the same sandbox or permission mode (refused if that cannot be read), from a fixed prompt and an args list with no shell. It links back with parentRunId, and the old run's card logs it.
