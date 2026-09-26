@@ -6,7 +6,7 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
-import { currentSession, loadSession, report } from "../core/run.mjs";
+import { findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
@@ -16,7 +16,7 @@ const ASK_WAIT_S = 45;
 
 const where = {
   cwd: { type: "string", description: "Required: the absolute path of your working folder. It picks this session's card." },
-  session_id: { type: "string", description: "The session id, when you know it (CODEX_THREAD_ID). Optional." },
+  session_id: { type: "string", description: "The session id, when you know it (CODEX_THREAD_ID). Pass it when you work in a git worktree your session did not start in." },
 };
 
 const TOOLS = [
@@ -96,9 +96,25 @@ for (const tool of TOOLS) tool.annotations = { readOnlyHint: READS.includes(tool
 
 // Codex starts this server in the plugin's folder with a bare environment (no thread id, no PWD), so there the
 // agent's cwd finds its session. Claude Code gives the server CLAUDE_CODE_SESSION_ID, which wins when no cwd is
-// passed (it can be stale after --continue, so a given cwd still decides).
-const sessionOf = (args) =>
-  args.session_id || (args.cwd ? currentSession(args.cwd, {}) : process.env.CLAUDE_CODE_SESSION_ID || null);
+// passed (it can be stale after --continue, so a given cwd still decides). A CODEX_THREAD_ID the server does have
+// names the session outright (unless this is Claude Code, where one leaks in from a Codex terminal); without it, the
+// folder, then a lone session in another worktree of the same repo (core/run.mjs findSession).
+const lookup = (args, env = process.env) => {
+  if (args.session_id) return { id: args.session_id };
+  if (env.CODEX_THREAD_ID && runtimeOf(env, []) === "codex") return { id: env.CODEX_THREAD_ID };
+  if (!args.cwd) return { id: env.CLAUDE_CODE_SESSION_ID || null, why: "no cwd" };
+  return findSession(args.cwd, {});
+};
+const sessionOf = (args) => lookup(args).id;
+/** Why no session: names the folder looked in and what to pass instead. */
+const noSession = (args) => {
+  const { why } = lookup(args);
+  if (why === "no cwd") return "No PipeXP session found: pass cwd (your working folder) or session_id.";
+  const where = "No PipeXP session found for " + args.cwd;
+  return why === "several"
+    ? where + ": several sessions use other worktrees of this repo, so it cannot tell which is yours. Pass session_id (your CODEX_THREAD_ID)."
+    : where + " (looked in this folder and other worktrees of its repo). Pass session_id (your CODEX_THREAD_ID).";
+};
 const ok = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const err = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
@@ -125,7 +141,7 @@ async function callTool(name, args = {}) {
     });
   }
   const id = sessionOf(args);
-  if (!id) return err("No PipeXP session found for this folder. Pass cwd (your working folder) or session_id.");
+  if (!id) return err(noSession(args));
   // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
   if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");
