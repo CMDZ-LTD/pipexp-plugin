@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { readJson, stateDir, writeJson } from "./config.mjs";
+import { repoOf } from "./stages.mjs";
 
 export const CHECK_MS = 10 * 60_000;
 // A default branch is never one piece of work, so its PR (if any) is not this session's.
@@ -34,14 +35,24 @@ export function markPrChecked(sessionId, branch, now = Date.now()) {
   } catch {}
 }
 
-/** Asks gh for the PR of the session's branch (open, merged or closed) and saves the answer. Returns the number or null. */
-export function lookUpPr(session, run = spawnSync, now = Date.now()) {
+// gh never asks anything, never checks for its own update, and gets no input: with no gh, or gh signed out, the call
+// fails at once and the session simply has no PR.
+const GH_ENV = { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_SPINNER_DISABLED: "1", NO_COLOR: "1" };
+
+/**
+ * Asks gh for the PR of the session's branch (open, merged or closed) and saves the answer. Returns the number or null.
+ * Only for a folder whose origin is on github.com: gh is never run for any other remote, or none.
+ */
+export function lookUpPr(session, run = spawnSync, now = Date.now(), repo = repoOf) {
   const branch = session?.gitBranch;
   if (!session?.cwd || !branch || TRUNKS.has(branch)) return null;
   let number = null;
+  const slug = repo(session.cwd);
   try {
-    const r = run("gh", ["pr", "view", branch, "--json", "number,headRefName"], { cwd: session.cwd, encoding: "utf8", timeout: 8000 });
-    const pr = r.status === 0 ? JSON.parse(r.stdout) : null;
+    const r = slug && run("gh", ["pr", "view", branch, "--repo", slug, "--json", "number,headRefName"], {
+      cwd: session.cwd, encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, ...GH_ENV },
+    });
+    const pr = r?.status === 0 ? JSON.parse(r.stdout) : null;
     if (pr?.headRefName === branch && Number.isInteger(pr.number) && pr.number > 0) number = pr.number;
   } catch {}
   try {

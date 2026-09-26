@@ -382,14 +382,15 @@ test("CMD-427: the flush asks gh for the branch's PR at most every ten minutes, 
   markPrChecked("pr-1", "codex/abc-12-x", T0);
   assert.equal(prDue("pr-1", "codex/abc-12-x", false, T0 + MIN), false, "asked a minute ago");
   assert.equal(prDue("pr-1", "codex/abc-12-x", true, T0 + MIN), true, "a push asks again");
-  assert.equal(lookUpPr(s, gh({ status: 1, stdout: "" }), T0), null, "no PR yet");
+  const repo = () => "acme/shop";
+  assert.equal(lookUpPr(s, gh({ status: 1, stdout: "" }), T0, repo), null, "no PR yet");
   assert.equal(prDue("pr-1", "codex/abc-12-x", false, T0 + CHECK_MS), true);
   // gh answers with another branch's PR (a fork's same-named branch): not this session's.
-  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 9, headRefName: "other" }) }), T0), null);
-  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 57, headRefName: "codex/abc-12-x" }) }), T0), 57);
+  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 9, headRefName: "other" }) }), T0, repo), null);
+  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 57, headRefName: "codex/abc-12-x" }) }), T0, repo), 57);
   assert.equal(cachedPr("pr-1", "codex/abc-12-x"), 57);
   assert.equal(cachedPr("pr-1", "codex/other"), null, "another branch has not been looked up");
   assert.equal(prDue("pr-1", "codex/abc-12-x", true, T0 + CHECK_MS * 10), false, "found: never asked again for this branch");
-  assert.deepEqual(calls.at(-1), ["gh", ["pr", "view", "codex/abc-12-x", "--json", "number,headRefName"], "/repo"]);
+  assert.deepEqual(calls.at(-1), ["gh", ["pr", "view", "codex/abc-12-x", "--repo", "acme/shop", "--json", "number,headRefName"], "/repo"]);
   assert.equal(lookUpPr({ ...s, gitBranch: "main" }, gh({ status: 0, stdout: "{}" })), null);
 });
