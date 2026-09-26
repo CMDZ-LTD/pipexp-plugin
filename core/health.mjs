@@ -151,9 +151,14 @@ export function queueAudit(force = false, now = Date.now()) {
   const file = join(stateDir(), "audit.json");
   const last = readJson(file) ?? {};
   const wait = last.stored === false ? HOUR : DAY;
-  if (!credentials() || (!force && now - (last.at ?? 0) < wait)) return false;
+  // What the last audit told the Machines tab. When hook trust changes, or a fault it showed has cleared, a fresh audit
+  // goes at once rather than a day later (CMD-370: trusted at 14:25, the tab said untrusted until the next day).
+  const snap = { trusted: hooksTrusted(), error: problem(now)?.code ?? null };
+  const was = last.snap;
+  const changed = !!was && (was.trusted !== snap.trusted || (was.error !== null && was.error !== snap.error));
+  if (!credentials() || (!force && !changed && now - (last.at ?? 0) < wait)) return false;
   try {
-    writeJson(file, { at: now, stored: null });
+    writeJson(file, { at: now, stored: null, snap });
     enqueue(audit(now));
     return true;
   } catch {

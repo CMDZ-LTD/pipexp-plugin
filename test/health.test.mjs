@@ -1,6 +1,6 @@
 // The machine's own health: the one-line status, the daily audit the Machines tab reads, and the untrusted-hooks line.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,13 @@ const { VERSION, saveCredentials } = await import("../core/config.mjs");
 const { audit, hooksTrusted, noteAudit, problem, queueAudit, tellOnce } = await import("../core/health.mjs");
 const { hook } = await import("../core/run.mjs");
 const { pending } = await import("../core/queue.mjs");
+const outbox = () => {
+  try {
+    return readdirSync(join(home, "state", "outbox")).filter((n) => n.endsWith(".json")).sort().map((n) => JSON.parse(readFileSync(join(home, "state", "outbox", n), "utf8")).event);
+  } catch {
+    return [];
+  }
+};
 const { run: flushNow } = await import("../bin/flush.mjs");
 
 const T = Date.parse("2026-09-26T09:00:00Z");
@@ -75,6 +82,7 @@ test("the audit goes out on connect and then once a day with the next flush, and
 });
 
 test("CMD-370: an audit the board refused is sent again an hour later, not a day; a stored one waits a day", async () => {
+  writeFileSync(join(home, "state", "audit.json"), "{}");
   const board = await fakeBoard([400]);
   saveCredentials({ url: board.url, key: "k".repeat(30) });
   const T2 = T + 10 * 86_400_000;
@@ -134,4 +142,26 @@ test("review: before the release tags are read, status does not claim this plugi
   const r = { at: "2026-09-26T12:30:55.612Z", type: "run.finished", status: 400, field: "outcome" };
   assert.doesNotMatch(refusedLine(r, null), /is the newest|upgrade/);
   assert.match(refusedLine(r, null), /No newer plugin is known: tell whoever runs the board/);
+});
+
+test("CMD-370: after a fault the last audit showed clears, the next SessionStart sends a fresh audit; a clean one sends none", () => {
+  saveCredentials({ url: "http://127.0.0.1:9", key: "k".repeat(30) });
+  writeFileSync(join(home, "state", "errors.log"), "");
+  // The last audit went out while the hooks were untrusted.
+  config(false);
+  assert.equal(queueAudit(true), true);
+  noteAudit(true);
+  const audits = () => outbox().filter((e) => e.type === "machine.audit");
+  const before = audits().length;
+  assert.equal(audits().at(-1).plugin.lastError, "hooks_untrusted");
+  // A person trusts them; the next session starts.
+  config(true);
+  hook({ session_id: "trust-1", cwd: "/repo", hook_event_name: "SessionStart" }, "codex");
+  assert.equal(audits().length, before + 1, "a fresh audit, at once");
+  assert.equal(audits().at(-1).plugin.hooksTrusted, true);
+  assert.equal(audits().at(-1).plugin.lastError, null);
+  noteAudit(true);
+  // All clean now: another session sends no audit.
+  hook({ session_id: "trust-2", cwd: "/repo", hook_event_name: "SessionStart" }, "codex");
+  assert.equal(audits().length, before + 1);
 });

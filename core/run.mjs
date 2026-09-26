@@ -8,6 +8,7 @@ import { credentials, machine, readJson, stateDir, writeJson } from "./config.mj
 import { RUNTIMES } from "./adapt.mjs";
 import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
+import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport } from "./session.mjs";
 import { routedRepo } from "./stages.mjs";
@@ -109,6 +110,8 @@ export function hook(input, runtime = runtimeOf()) {
     const { state, events } = onHook(existing, input, ctx);
     return commit(state, events);
   });
+  // A new session is when a fixed fault shows: the audit goes now if trust changed or the last one showed a fault.
+  if (input.hook_event_name === "SessionStart" && credentials()) queueAudit();
   if (events.length && credentials()) kick();
   prune();
   return events;
