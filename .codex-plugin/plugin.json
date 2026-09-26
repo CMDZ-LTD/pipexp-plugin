@@ -4,7 +4,7 @@
   "description": "Reports every coding-agent session to your PipeXP board: stage, time, tokens, snags and questions for a person.",
   "author": {
     "name": "CMDZ",
-    "email": "derek@cmdz.ltd",
+    "email": "derek@cmdz.io",
     "url": "https://pipexp.dev"
   },
   "homepage": "https://pipexp.dev",

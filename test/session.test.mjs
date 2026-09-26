@@ -130,7 +130,7 @@ test("three failing test runs in a row report a snag, once", () => {
   assert.equal(snags[0].costMin, null);
 });
 
-test("a session holding a Nudj ship claim is left to the ship skill; its guessed run is closed", () => {
+test("a session holding a ship claim is left to the ship skill; its guessed run is closed", () => {
   let claimed = false;
   const c = { probe: probe({ shipClaim: () => (claimed ? "NJ-3236" : null) }) };
   const first = play([[0, { hook_event_name: "UserPromptSubmit" }]], c);

@@ -28,7 +28,10 @@ export function writeJson(path, value, mode = 0o600) {
   chmodSync(path, mode);
 }
 
-/** A key from the old /setup page: ~/.config/nudj/telemetry.env, "export NAME=value" lines. */
+/**
+ * A key from the old /setup page: ~/.config/nudj/telemetry.env, "export NAME=value" lines. Kept so machines set up
+ * before PipeXP had its own name keep reporting; the folder and variable names are the ones those machines have.
+ */
 function legacy() {
   try {
     const text = readFileSync(join(homedir(), ".config", "nudj", "telemetry.env"), "utf8");
@@ -51,7 +54,7 @@ export function credentials() {
 
 export const saveCredentials = (value) => writeJson(join(home(), "credentials.json"), value);
 
-/** This machine's id and name, made once. Reuses the id the Nudj ship skill already made, so the board keeps one machine. */
+/** This machine's id and name, made once. Reuses the id an older ship skill made (the same legacy folder), so the board keeps one machine. */
 export function machine() {
   const path = join(home(), "machine.json");
   const mine = readJson(path);

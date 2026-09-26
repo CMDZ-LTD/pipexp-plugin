@@ -18,7 +18,7 @@ const TEST_CMD =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|typecheck|lint|build|check|e2e)\b|\b(npx\s+)?(vitest|jest|pytest|playwright|mocha|tsc|eslint|rspec|phpunit)\b|\bcargo\s+(test|check|clippy|build)\b|\bgo\s+(test|vet|build)\b|\b(gradle|mvn|dotnet)\s+test\b|\bnode\s+--test\b|\bmake\s+(test|check)\b/;
 const NOT_TICKETS = new Set(["UTF", "SHA", "ISO", "MD", "PR", "ISSUE", "FEAT", "FIX", "CHORE", "RELEASE", "HOTFIX", "BUGFIX", "SPRINT", "WEEK", "DAY", "PHASE", "STEP", "PART"]);
 
-/** Python's uuid5(NAMESPACE_URL, name), so ids match the Nudj ship scripts'. */
+/** Python's uuid5(NAMESPACE_URL, name), so ids match the ship scripts'. */
 export function uuid5(name) {
   const ns = Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex");
   const h = createHash("sha1").update(Buffer.concat([ns, Buffer.from(name, "utf8")])).digest();
@@ -179,7 +179,7 @@ export function onHook(state, input, ctx) {
   s.runtimeVersion = version;
   const out = [];
 
-  // Until the Nudj ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
+  // Until a ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
   // Checked at turn edges and when a tool call runs ship's claim script, so other tool calls never pay for it.
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || (name === "PostToolUse" && /claim-run\.sh/.test(commandOf(input.tool_input)));
   if (edge && !s.shipOwned && !s.explicit && ctx.probe.shipClaim(s.cwd, s.sessionId)) {
