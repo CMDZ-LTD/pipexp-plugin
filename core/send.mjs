@@ -71,6 +71,12 @@ export async function post(creds, event) {
       if (!isCapped(event.runId)) appendFileSync(cappedFile(), event.runId + "\n");
     } catch {}
   }
+  if (res.status === 403 && event.repo && /No project for this repo/.test(res.body?.error ?? "")) {
+    const { markRefused } = await import("./stages.mjs");
+    markRefused(event.repo);
+    const { repo: _repo, ...rest } = event;
+    return post(creds, rest);
+  }
   if (res.status >= 400 && res.status < 500) {
     logRefusal(event, res.status, res.body);
     return "refused";
