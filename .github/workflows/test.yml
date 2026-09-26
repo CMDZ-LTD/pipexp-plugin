@@ -5,6 +5,7 @@ on:
   pull_request:
 jobs:
   test:
+    # GitHub-hosted: free for a public repo, and a fork's pull request never runs on our own machines.
     runs-on: ubuntu-latest
     strategy:
       matrix:

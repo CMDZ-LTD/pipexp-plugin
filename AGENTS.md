@@ -1,7 +1,7 @@
 # PipeXP plugin
 
 Reports coding-agent sessions to a PipeXP board (CMDZ-LTD/agent-pipeline, live at https://pipexp.dev).
-Codex first, Claude Code next, then other harnesses. Derek (CMDZ CEO, dyslexic: short answers, tables) merges.
+Codex first, Claude Code next, then other harnesses. Changes land through a pull request; the maintainers merge.
 
 ## Shape
 

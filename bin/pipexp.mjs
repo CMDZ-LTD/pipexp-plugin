@@ -8,18 +8,22 @@
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
+//   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
+//   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
 //   pipexp uninstall cursor              take PipeXP out of Cursor's hooks
 // Every report command takes --session <id> (default: this Codex or Claude session) and never fails a script:
 // it exits 0 unless the arguments are wrong (2). ask exits 3 when it cannot get an answer.
 import { parseArgs } from "node:util";
-import { credentials, home, machine, readJson, writeJson } from "../core/config.mjs";
+import { credentials, home, machine, readJson, VERSION, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
+import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
-import { pending } from "../core/queue.mjs";
-import { currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { pending, queued } from "../core/queue.mjs";
+import { restartAllowed, setRestart } from "../core/restart.mjs";
+import { contentFor, currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
@@ -51,6 +55,7 @@ const { positionals, values } = parseArgs({
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
+    all: { type: "boolean" },
     background: { type: "boolean" },
     runtime: { type: "string" },
     claim: { type: "string" },
@@ -68,6 +73,7 @@ const parse = (s, what) => {
   // JSON.parse quotes what it rejects, which may hold a secret: never echo it.
   return fail(what + " is not a JSON object");
 };
+const settingsContent = () => readJson(join(home(), "settings.json"))?.content;
 const session = () => values.session ?? currentSession() ?? fail("no session found; pass --session <id>");
 
 async function main() {
@@ -76,12 +82,18 @@ async function main() {
       let key = "";
       for await (const chunk of process.stdin) key += chunk;
       const r = saveKey(key);
-      return r.ok ? out("Connected " + r.machine + ".") : fail(r.reason, 1);
+      if (!r.ok) return fail(r.reason, 1);
+      queueAudit(true);
+      return out("Connected " + r.machine + ".");
     }
     const r = await connect({ runtime, say: values.background ? () => {} : out, open: true });
     if (r.ok) {
+      queueAudit(true);
       await flushNow().catch(() => {});
-      return values.background ? undefined : out("Connected " + r.machine + ". Runs now show on " + r.boardUrl);
+      if (values.background) return;
+      out("Connected " + r.machine + ". Runs now show on " + r.boardUrl);
+      if (hooksTrusted() === false) out("One more step: " + FIX.hooks_untrusted);
+      return;
     }
     return values.background ? undefined : fail(r.reason, 1);
   }
@@ -90,10 +102,11 @@ async function main() {
     const id = values.session ?? currentSession();
     const s = id ? loadSession(id) : null;
     const board = c?.boardUrl ?? "https://pipexp.dev";
-    out(c ? "Connected: " + machine().name + " to " + new URL(c.url).host + " (" + c.source + ")" : "Not connected. Run: pipexp connect");
-    const disc = readJson(join(home(), "state", "disconnected.json"));
-    if (disc?.at) out("The board refused this machine's key at " + disc.at + ". Run: pipexp connect");
-    out("Queued events: " + pending());
+    // Line one is the whole answer: what is wrong and the fix, or that all is well.
+    const p = problem();
+    out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
+    out("Queued events: " + pending() + " · pipexp " + VERSION);
+    out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
@@ -101,6 +114,29 @@ async function main() {
     const r = await stagesFor(process.cwd());
     if (!r.lanes) return fail("no stages: " + r.reason, 1);
     return out(values.raw ? JSON.stringify({ repo: r.repo, lanes: r.lanes }) : describe(r.lanes) + (r.from === "cache" ? "\n(from the last time the board answered)" : ""));
+  }
+  if (cmd === "allow" || cmd === "deny") {
+    if (arg !== "restart") fail(cmd + " takes restart");
+    setRestart(cmd === "allow");
+    // The board greys Restart out until the machine's audit says it is on, so it goes now.
+    queueAudit(true);
+    await flushNow().catch(() => {});
+    return out(cmd === "allow"
+      ? "Restart is on: the owner of this machine's key can restart its runs on another model from the board, in the same folder and mode."
+      : "Restart is off on this machine.");
+  }
+  if (cmd === "preview") {
+    // Nothing is sent here: the outbox already holds each event as it will go, scrubbed and cut to the content level.
+    const id = values.all ? null : (values.session ?? currentSession());
+    const runs = id ? new Set(Object.values(loadSession(id)?.runs ?? {}).concat(loadSession(id)?.runId ?? [])) : null;
+    const events = queued().filter((e) => !runs || runs.has(e.runId)).map(({ _usage, ...e }) => (_usage ? { ...e, agents: "(token counts read from the transcript when sent)" } : e));
+    if (values.raw) return out(JSON.stringify(events, null, 2));
+    const s = id ? loadSession(id) : null;
+    out("Content level: " + contentFor(s?.cwd ?? process.cwd()) + (settingsContent() === "minimal" ? " (this machine)" : ""));
+    if (!events.length) return out(id ? "Nothing waiting for this session: everything so far has been sent." : "Nothing waiting to be sent.");
+    out(events.length + " event" + (events.length > 1 ? "s" : "") + " waiting" + (id ? " for this session" : "") + ", as they will be sent:");
+    for (const e of events) out(JSON.stringify(e));
+    return;
   }
   if (cmd === "disconnect") return out(disconnect() ? "Disconnected. The key is deleted from this machine; revoke it at https://pipexp.dev/setup." : "Not connected.");
   if (cmd === "content") {
@@ -139,7 +175,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

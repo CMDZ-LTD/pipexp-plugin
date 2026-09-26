@@ -8,9 +8,12 @@ import { credentials, machine, readJson, stateDir, writeJson } from "./config.mj
 import { RUNTIMES } from "./adapt.mjs";
 import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
+import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { onHook, onReport } from "./session.mjs";
-import { routedRepo } from "./stages.mjs";
+import { onHook, onIdle, onReport } from "./session.mjs";
+import { boardContent, routedRepo } from "./stages.mjs";
+import { markChecked, steerDue } from "./steer.mjs";
+import { restartPlan, startRestart } from "./restart.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -37,14 +40,23 @@ export const runtimeOf = (env = process.env, argv = process.argv) => {
   return "codex";
 };
 
-export function context(runtime, transcriptPath, known, now = Date.now()) {
+/**
+ * How much this machine sends (CMD-343): minimal when either this machine (pipexp content minimal) or the project on the
+ * board says so. The board's level comes from /plugin/config, cached per repo; a machine can go stricter, never looser.
+ */
+export const contentFor = (cwd) => (settings().content === "minimal" || (cwd && boardContent(cwd) === "minimal") ? "minimal" : "standard");
+
+export function context(runtime, transcriptPath, known, now = Date.now(), cwd = null) {
   return {
     now,
     runtime,
     machineId: machine().id,
     // Read once per session: the first line of a Codex transcript can be tens of KB.
     runtimeVersion: known ?? probe.runtimeVersion(runtime, transcriptPath),
-    content: settings().content === "minimal" ? "minimal" : "standard",
+    content: contentFor(cwd),
+    // Set by a restart for the new session it starts (core/restart.mjs).
+    parentRunId: process.env.PIPEXP_PARENT_RUN || null,
+    ticket: process.env.PIPEXP_TICKET || null,
     probe,
   };
 }
@@ -59,11 +71,11 @@ function commit(state, events) {
   return events;
 }
 
-/** Starts a flush in its own process group, so it outlives a hook the harness kills. */
-export function kick() {
+/** Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's steers. */
+export function kick(steerFor) {
   if (process.env.PIPEXP_NO_FLUSH) return;
   try {
-    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: process.env }).unref();
+    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: steerFor ? { ...process.env, PIPEXP_STEER_SESSION: steerFor } : process.env }).unref();
   } catch {
     // The next hook tries again.
   }
@@ -105,11 +117,16 @@ export function hook(input, runtime = runtimeOf()) {
   if (!input?.session_id) return [];
   const events = withSessionLock(input.session_id, () => {
     const existing = loadSession(input.session_id);
-    const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion);
+    const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion, Date.now(), input.cwd ?? existing?.cwd);
     const { state, events } = onHook(existing, input, ctx);
     return commit(state, events);
   });
-  if (events.length && credentials()) kick();
+  // A new session is when a fixed fault shows: the audit goes now if trust changed or the last one showed a fault.
+  if (input.hook_event_name === "SessionStart" && credentials()) queueAudit();
+  // A live session asks the board for steers every CHECK_MS, through the detached flush, never in this hook.
+  const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
+  if (steer) markChecked(steer);
+  if ((events.length || steer) && credentials()) kick(steer ?? undefined);
   prune();
   return events;
 }
@@ -118,7 +135,7 @@ export function hook(input, runtime = runtimeOf()) {
 export function report(sessionId, rep, runtime = runtimeOf(), cwd = process.cwd()) {
   const { state, events } = withSessionLock(sessionId, () => {
     const existing = loadSession(sessionId);
-    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion);
+    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), existing?.cwd ?? cwd);
     // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
     const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
     const result = onReport(base, rep, ctx);
@@ -142,16 +159,26 @@ const real = (path) => {
  * this folder (or a parent of it). Folders are compared by real path: macOS /tmp is /private/tmp. A finished
  * session still counts, so a report after the turn ended lands on the same card and brings it back.
  */
-export function currentSession(cwd = process.cwd(), env = process.env) {
+export const currentSession = (cwd = process.cwd(), env = process.env) => findSession(cwd, env).id;
+
+/**
+ * currentSession, with why it found none. An agent often works in a git worktree its session did not start in
+ * (CMD-370): then the one session seen in another worktree of the same repo (same git common dir) is it. With
+ * several there, it could be another agent's card, so none is picked and the caller is told to pass session_id.
+ */
+export function findSession(cwd = process.cwd(), env = process.env, git = probe.git) {
   // The harness this process runs in names the session; a Codex thread id can leak into a Claude Code shell.
   const id = runtimeOf(env, []) === "claude" ? env.CLAUDE_CODE_SESSION_ID : env.CODEX_THREAD_ID || env.CODEX_SESSION_ID;
-  if (id) return id;
+  if (id) return { id, via: "env" };
   const here = real(cwd);
   let best = null;
+  const all = [];
   try {
     for (const name of readdirSync(sessions())) {
+      if (!name.endsWith(".json")) continue;
       const s = readJson(join(sessions(), name));
       if (!s?.cwd) continue;
+      all.push(s);
       const root = real(s.cwd);
       if (here !== root && !here.startsWith(root + "/")) continue;
       // The deepest matching folder wins (a session in the repo beats one in a parent), then the most recent.
@@ -159,7 +186,65 @@ export function currentSession(cwd = process.cwd(), env = process.env) {
       if (!best || depth > best.depth || (depth === best.depth && s.lastSeenAt > best.s.lastSeenAt)) best = { s, depth };
     }
   } catch {}
-  return best?.s.sessionId ?? null;
+  if (best) return { id: best.s.sessionId, via: "folder" };
+  const common = git(here)?.common;
+  if (!common) return { id: null, why: "none" };
+  // One git call per distinct folder, not per session file.
+  const commons = new Map();
+  const commonOf = (dir) => (commons.has(dir) ? commons.get(dir) : commons.set(dir, git(dir)?.common ?? null).get(dir));
+  const same = [...new Set(all.filter((s) => commonOf(real(s.cwd)) === common).map((s) => s.sessionId))];
+  if (same.length === 1) return { id: same[0], via: "worktree" };
+  return { id: null, why: same.length ? "several" : "none" };
+}
+
+/**
+ * Moves every session no hook has heard from for a while to Waiting for you (session.mjs onIdle). The flush runs it,
+ * so a closed Codex thread's card leaves Build or Test within a flush of the next hook on this machine.
+ */
+export function sweepIdle(now = Date.now()) {
+  let moved = 0;
+  try {
+    for (const name of readdirSync(sessions())) {
+      if (!name.endsWith(".json")) continue;
+      const id = readJson(join(sessions(), name))?.sessionId;
+      if (!id) continue;
+      moved += withSessionLock(id, () => {
+        const { state, events } = onIdle(loadSession(id), now);
+        if (!events.length) return 0;
+        commit(state, events);
+        return 1;
+      });
+    }
+  } catch {}
+  return moved;
+}
+
+/**
+ * Carries out a restart the board sent for this session (CMD-80), from the steers the flush just fetched: the same
+ * steer also sits in the inbox for the hook to end the turn with, and the new run starts here, once per steer id. Refused ones are logged on the old run as a snag, so the
+ * card says why nothing started.
+ */
+export function carryOutRestarts(sessionId, steers, start = startRestart) {
+  const s = loadSession(sessionId);
+  if (!s || !Array.isArray(steers)) return 0;
+  const done = new Set(s.restarted ?? []);
+  let started = 0;
+  for (const steer of steers.filter((w) => w.kind === "restart")) {
+    // One run per steer: by its id (an older board sends none: then model and message).
+    const key = steer.steerId ?? steer.model + "|" + steer.message;
+    if (done.has(key)) continue;
+    done.add(key);
+    const plan = restartPlan(s, steer);
+    const pid = plan.why ? null : start(plan, join(stateDir(), "restart-" + s.runId + ".log"));
+    const why = plan.why ?? (pid ? null : "the " + plan.file + " command could not be started on this machine");
+    report(sessionId, { type: "snag.reported", fields: { kind: why ? "snag" : "worked", theme: "restart", what: why ? "Restart on " + steer.model + " refused: " + why : "Restarted on " + steer.model + " in the same folder and mode", costMin: null } }, s.runtime, s.cwd);
+    if (!why) started++;
+  }
+  withSessionLock(sessionId, () => {
+    const now = loadSession(sessionId);
+    if (now) writeJson(sessionFile(sessionId), { ...now, restarted: [...done].slice(-20) });
+  });
+  return started;
 }
 
 // ponytail: sessions untouched for 14 days are deleted on each hook; fine at a few hundred files.

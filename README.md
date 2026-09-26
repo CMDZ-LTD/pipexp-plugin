@@ -9,7 +9,7 @@ Install it once per machine. Your own skills need no changes.
 | Codex | Works: hooks, skill, MCP server |
 | Claude Code | Works: the same hooks file, skill and MCP server (`.claude-plugin/`) |
 | Gemini CLI | Works: a Gemini extension (`gemini-extension.json`); tokens from its transcript |
-| Cursor | Works: `pipexp install cursor` adds hooks to `~/.cursor/hooks.json`. Cursor keeps no token counts on the machine, so cards show none |
+| Cursor | Works: `pipexp install cursor` adds hooks to `~/.cursor/hooks.json`. Cursor keeps no token counts on the machine, so cards say "Tokens not reported" |
 | OpenCode | Works: `pipexp install opencode` adds a small plugin; tokens from OpenCode's own messages |
 | Qoder, Devin | Next |
 
@@ -67,7 +67,11 @@ defines lanes and stages (`GET /plugin/config`), not the plugin.
 
 **Never sent:** prompts, code, file contents, command output. Free text (titles, snags, questions) is scrubbed
 on this machine first: keys and tokens, env values, emails, home folders, machine names, IPv4 and IPv6 addresses,
-store domains and database ids. `pipexp content minimal` also drops session titles and branch names.
+store domains and database ids. `pipexp content minimal` also drops session titles, branch names and the creator's login.
+A project owner can set minimal for the whole project on the board (Settings); the plugin reads it from `/plugin/config` and
+sends minimal for that repo's sessions, whatever this machine is set to. A machine can be stricter than its project,
+never looser. `pipexp preview` prints what this session sends next, exactly as it will go. The scrubber passes the board's
+own redaction cases (`test/fixtures/redaction-fixtures.json`, a copy of agent-pipeline `lib/redaction-fixtures.json`).
 
 **Never blocks:** a hook writes to a local outbox and exits in milliseconds; a detached process sends. Offline,
 events wait (at most 500, each retried up to 8 times) and go out in order when the board is back. Each event keeps
@@ -77,19 +81,19 @@ its id, so a resend is never counted twice.
 
 Everything lives in `~/.config/pipexp` (`PIPEXP_HOME` overrides it): `credentials.json` (the key, mode 600),
 `machine.json`, `settings.json`, `state/` (sessions, outbox, errors log), `bin/pipexp` (a stable path to the CLI).
-Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env`.
+Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env` (kept so machines set up before PipeXP had its own name keep reporting).
 
 ## Commands
 
 ```text
-pipexp connect | status | disconnect | flush | content standard|minimal
+pipexp connect | status | disconnect | flush | preview [--all] [--raw] | allow restart | deny restart | content standard|minimal
 pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'
 pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]
 ```
 
-### Contract for skills (the Nudj ship skill calls these)
+### Contract for skills (a skill with its own stages calls these)
 
 Call `~/.config/pipexp/bin/pipexp` detached and ignore its exit code. It exits 0 unless its arguments are wrong (2); `ask` exits 3 when
 nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`, so a skill running inside a session never passes it.
@@ -106,9 +110,9 @@ nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSI
 
 Not installed: `[ -x ~/.config/pipexp/bin/pipexp ] || exit 0`. The path is written the first time a session starts with the plugin.
 
-## Replaces Nudj monorepo #4823
+## Replaces a skill's own telemetry sender
 
-The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves into this plugin. Ticked items are built and tested here.
+A ship skill's own telemetry sender moves into this plugin. Ticked items are built and tested here.
 
 - [x] Scrubbing: home paths, .local/.lan hosts, IPv4 and IPv6, myshopify.com, 24-hex ids, token shapes; redact before cut (`core/scrub.mjs`, `test/scrub.test.mjs`)
 - [x] Test runs send only to localhost (`PIPEXP_TEST`, `NODE_TEST_CONTEXT`, `VITEST`, `PYTEST_CURRENT_TEST`)
@@ -119,7 +123,7 @@ The Nudj ship skill's own telemetry (monorepo PR #4823, head d7737ea7) moves int
 - [x] run.finished: stopReason, question, link, postMerge, followUps, ownerTold pass through `pipexp event run.finished`
 - [x] Usage per agent: activeSeconds, toolWaitSeconds (calls over 60 s), compactions, runtimeVersion, Codex sub-agent trees and Claude sub-agents (`core/usage.mjs`, #4823's fixtures)
 - [x] gate.checked and review.done: `pipexp event gate.checked|review.done --json`, detached and fail-open
-- [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no Nudj key prefix check
+- [x] Ask a person on the board (`pipexp ask`, `pipexp_ask_human`), with no key prefix check
 - [x] attemptId per claim (`--claim new|resume|takeover`) and finishing a displaced run as abandoned on takeover (`pipexp event run.finished --session <old task id> --lane ship`)
 - [ ] Ship skill calls the plugin instead of its own scripts, and does nothing when the plugin is not installed (monorepo change)
 
@@ -134,6 +138,7 @@ To try local changes in Codex: `python3 ~/.codex/skills/.system/plugin-creator/s
 then `codex plugin add pipexp@personal` and start a new session. Never commit the `+codex.<stamp>` version it writes:
 `test/version.test.mjs` fails on it.
 
-Release: bump the version in `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `package.json` and `VERSION` in
-`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.1 && git push --tags`). Installed copies
+Release: bump the version in `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `package.json`, `gemini-extension.json` and `VERSION` in
+`core/config.mjs` (the test checks they match), push to main, and tag it (`git tag v0.1.10 && git push --tags`). In the same go, set
+`LATEST_PLUGIN` in agent-pipeline `lib/machines.ts` to the new version, so machines behind it show "Update available". Installed copies
 pick it up with `codex plugin marketplace upgrade pipexp`.

@@ -1,4 +1,4 @@
-// What a hook reads from the machine: git, Codex's thread names, the Nudj ship skill's claims. All fail soft.
+// What a hook reads from the machine: git, Codex's thread names, a ship skill's claims. All fail soft.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
@@ -112,7 +112,22 @@ export function runtimeVersion(runtime, transcriptPath) {
 }
 
 /**
- * The ticket this session holds a Nudj ship claim on, while the ship skill still sends its own telemetry
+ * This machine's GitHub login, for "Created by" on its cards (CMD-370): gh's own config, else git config github.user.
+ * Read from files only, never the network. Null when unknown.
+ */
+export function githubLogin() {
+  const dir = process.env.GH_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "gh");
+  let login = null;
+  try {
+    // The github.com block's own "user:" line; "users:" (one entry per account) and tokens are never read.
+    login = readFileSync(join(dir, "hosts.yml"), "utf8").match(/^github\.com:[^\n]*\n(?:[ \t][^\n]*\n)*?[ \t]+user:[ \t]*["']?([A-Za-z0-9-]+)/m)?.[1] ?? null;
+  } catch {}
+  if (!login) login = spawnSync("git", ["config", "--get", "github.user"], { encoding: "utf8", timeout: 2000 }).stdout?.trim() || null;
+  return /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(login ?? "") ? login : null;
+}
+
+/**
+ * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
  */
 export function shipClaim(cwd, sessionId) {

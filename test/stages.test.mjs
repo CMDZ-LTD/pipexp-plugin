@@ -42,12 +42,12 @@ test("the board's config answer is the shape the plugin reads", () => {
   assert.match(describe(contract.lanes), /agent:S5 Waiting for you \[waits on a person\]/);
 });
 
-test("asks the board for this repo's stages, caches them, then names the repo on the session's events", async () => {
+test("CMD-370: names the repo from the git remote at once, asks the board for its stages, and caches them", async () => {
   const b = await board((url) => [200, url.includes("repo=acme%2Fapp") ? { lanes: [{ skill: "triage", label: "Triage", stages: [{ id: "triage:S1", label: "Read" }] }] } : contract]);
   process.env.PIPEXP_URL = b.url;
   process.env.PIPEXP_KEY = "k".repeat(30);
   const dir = checkout("git@github.com:acme/app.git");
-  assert.equal(routedRepo(dir), null, "no repo on events before the board accepted it");
+  assert.equal(routedRepo(dir), "acme/app", "the remote names the repo before the board is ever asked");
   const r = await stagesFor(dir);
   assert.equal(r.from, "board");
   assert.deepEqual(r.lanes.map((l) => l.skill), ["triage"]);
@@ -83,4 +83,35 @@ test("a repo the key cannot report to says so and names no repo", async () => {
   assert.equal(r.lanes, null);
   assert.match(r.reason, /no PipeXP project/);
   assert.equal(routedRepo(dir), null);
+});
+
+test("CMD-370: an event whose repo the board refuses (403) is sent again without it, and later ones name no repo", async () => {
+  const bodies = [];
+  const b = await board(() => [200, {}]);
+  await b.close();
+  const { createServer: serve } = await import("node:http");
+  const server = serve((req, res) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      const e = JSON.parse(body);
+      bodies.push(e);
+      const refuse = e.repo === "acme/secret";
+      res.writeHead(refuse ? 403 : 201, { "content-type": "application/json" });
+      res.end(JSON.stringify(refuse ? { error: "No project for this repo that this key can report to" } : { ok: true }));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const { post } = await import("../core/send.mjs");
+    const creds = { url: "http://127.0.0.1:" + server.address().port, key: "k".repeat(30) };
+    const dir = checkout("https://github.com/acme/secret.git");
+    assert.equal(routedRepo(dir), "acme/secret");
+    const event = { type: "step.entered", eventId: "e1", runId: "r1", occurredAt: "2026-09-26T10:00:00Z", skill: "agent", runtime: "codex", stage: "agent:S2", repo: "acme/secret" };
+    assert.equal(await post(creds, event), "sent");
+    assert.deepEqual(bodies.map((x) => x.repo ?? null), ["acme/secret", null], "sent once more, with no repo");
+    assert.equal(routedRepo(dir), null, "later events go to the key's own project");
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
 });
