@@ -110,3 +110,24 @@ test("a stop shown to an agent moves its card to Waiting for you; a ship run kee
   assert.equal(loadSession("s-5").skill, "ship");
   assert.equal(loadSession("s-5").stage, "ship:S4");
 });
+
+test("review: a steer the board sends again (its reply was lost) is shown once, and the next call acknowledges it", async () => {
+  const ID = "0b5c7c1e-4a8e-4d3a-9c55-2f1e6a7b8c90";
+  const seen = [];
+  const { createServer: serve } = await import("node:http");
+  const server = serve((req, res) => {
+    seen.push(req.url);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ steers: [{ steerId: ID, kind: "stop", message: STOP.message }] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const creds = { url: "http://127.0.0.1:" + server.address().port, key: "pipexp_rk_" + "k".repeat(43) };
+  hook({ session_id: "s-ack", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
+  const s = loadSession("s-ack");
+  assert.equal(await fetchSteers(creds, s), 1);
+  assert.equal(await fetchSteers(creds, s), 0, "the same id again: not shown twice");
+  await new Promise((r) => server.close(r));
+  assert.doesNotMatch(seen[0], /ack=/);
+  assert.match(seen[1], new RegExp("&ack=" + ID));
+  assert.equal(takeSteers("s-ack").length, 1);
+});

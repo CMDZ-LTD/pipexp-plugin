@@ -10,18 +10,43 @@ const inbox = () => join(stateDir(), "steers");
 const safe = (id) => String(id).replace(/[^\w.-]/g, "_").slice(0, 120);
 const fileOf = (sessionId) => join(inbox(), safe(sessionId) + ".json");
 
-/** Asks the board for this run's waiting steers and adds them to the session's inbox. Quietly does nothing on failure. */
+// The steer ids this session already has, so a repeat from the board is shown once, and the board is told (ack).
+const seenFile = (sessionId) => fileOf(sessionId) + ".seen";
+const seenIds = (sessionId) => {
+  try {
+    const ids = JSON.parse(readFileSync(seenFile(sessionId), "utf8"));
+    return Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Asks the board for this run's waiting steers and adds new ones to the session's inbox. The board keeps each steer
+ * waiting until the machine acknowledges its id, so a lost reply loses nothing; this call acknowledges what it
+ * already holds, and skips a repeat by id. Quietly does nothing on failure.
+ */
 export async function fetchSteers(creds, session) {
   if (!session?.runId || session.shipOwned || session.finished) return 0;
+  const seen = seenIds(session.sessionId);
   let res;
   try {
-    const q = "?runId=" + encodeURIComponent(session.runId) + (session.repo ? "&repo=" + encodeURIComponent(session.repo) : "");
+    const q = "?runId=" + encodeURIComponent(session.runId) + (session.repo ? "&repo=" + encodeURIComponent(session.repo) : "") + (seen.length ? "&ack=" + seen.slice(-20).join(",") : "");
     res = await call(creds, "/steer" + q, { method: "GET" }, 4000);
   } catch {
     return 0;
   }
   const got = Array.isArray(res?.body?.steers) ? res.body.steers.filter((s) => (s.kind === "note" || s.kind === "stop") && typeof s.message === "string") : [];
-  if (!got.length) return 0;
+  // An older board sends no id: every steer is new. A known id is a repeat of one this machine already has.
+  const fresh = got.filter((s) => !(typeof s.steerId === "string" && seen.includes(s.steerId)));
+  const ids = got.map((s) => s.steerId).filter((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id));
+  if (ids.length) {
+    try {
+      mkdirSync(inbox(), { recursive: true, mode: 0o700 });
+      writeFileSync(seenFile(session.sessionId), JSON.stringify([...new Set([...seen, ...ids])].slice(-40)), { mode: 0o600 });
+    } catch {}
+  }
+  if (!fresh.length) return 0;
   try {
     mkdirSync(inbox(), { recursive: true, mode: 0o700 });
     const file = fileOf(session.sessionId);
@@ -30,10 +55,10 @@ export async function fetchSteers(creds, session) {
       waiting = JSON.parse(readFileSync(file, "utf8"));
     } catch {}
     const tmp = file + "." + process.pid + ".tmp";
-    writeFileSync(tmp, JSON.stringify([...waiting, ...got].slice(-10)), { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify([...waiting, ...fresh].slice(-10)), { mode: 0o600 });
     renameSync(tmp, file);
   } catch {}
-  return got.length;
+  return fresh.length;
 }
 
 /** True when these steers include a stop: the hook then moves the card to Waiting for you. */
