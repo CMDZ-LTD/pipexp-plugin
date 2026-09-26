@@ -6,8 +6,8 @@ Install it once per machine. Your own skills need no changes.
 
 | Harness | Status |
 |---|---|
-| Codex | Phase 1: hooks, skill, MCP server |
-| Claude Code | Phase 2: same hooks and MCP server; manifest in `.claude-plugin/` |
+| Codex | Works: hooks, skill, MCP server |
+| Claude Code | Works: the same hooks file, skill and MCP server (`.claude-plugin/`) |
 | Cursor, Gemini CLI, OpenCode, Qoder, Devin | Phase 3 |
 
 ## Install (Codex)
@@ -20,6 +20,18 @@ codex plugin add pipexp@pipexp
 Then open `/hooks` in Codex and trust PipeXP's hooks (Codex asks once; updates keep the same hook command,
 so they do not ask again). Start a session: a browser tab opens at pipexp.dev/connect with a code. Check the
 code, click **Connect**, and the session is on your board. Over SSH, run `pipexp connect` and open the link it prints.
+
+## Install (Claude Code)
+
+```text
+/plugin marketplace add CMDZ-LTD/pipexp-plugin
+/plugin install pipexp@pipexp
+```
+
+Or from a terminal: `claude plugin marketplace add CMDZ-LTD/pipexp-plugin` then `claude plugin install pipexp@pipexp`.
+Start a session and approve the code, as for Codex. A machine connected once serves both: they share `~/.config/pipexp`.
+Claude sessions show as `claude <version>` on the card. Failed tool calls come from Claude's `PostToolUseFailure` hook, and tokens from its
+transcript, counted once per message, with sub-agents included.
 
 ## What it sends
 

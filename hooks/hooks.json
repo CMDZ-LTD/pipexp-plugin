@@ -1,5 +1,5 @@
 {
-  "description": "PipeXP: reports this session to your PipeXP board. Every hook runs the same launcher.",
+  "description": "PipeXP: reports this session to your PipeXP board. Codex and Claude Code both load this file; every hook runs the same launcher, which tells the two apart.",
   "hooks": {
     "SessionStart": [
       {
@@ -34,6 +34,17 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pipexp-hook.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -51,7 +62,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pipexp-hook.mjs\"",
-            "timeout": 3
+            "timeout": 2
           }
         ]
       }

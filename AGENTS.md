@@ -10,6 +10,9 @@ Codex first, Claude Code next, then other harnesses. Derek (CMDZ CEO, dyslexic: 
   `connect.mjs` (the only code that knows how a machine connects), `ask.mjs`, `run.mjs` (glue).
 - `hooks/pipexp-hook.mjs` is the one command every hook runs. Keep `hooks/hooks.json` byte-stable: Codex asks people
   to re-trust hooks whose definition changes. Add behaviour in core, not new hook commands.
+- Codex and Claude Code both load `hooks/hooks.json`. Never add a `hooks` key to `.claude-plugin/plugin.json`: Claude loads it
+  as well as the default file, and every event is sent twice. `runtimeOf()` in `core/run.mjs` tells the harnesses apart
+  (PLUGIN_ROOT is Codex only; a CODEX_THREAD_ID leaks into a Claude started from a Codex terminal).
 - `mcp/server.mjs` (stdio MCP, no SDK) and `bin/pipexp.mjs` (CLI) are thin over core.
 - No npm dependencies. Node 18+. Hooks must never block or fail: write to the outbox, kick `bin/flush.mjs` detached, exit 0.
 

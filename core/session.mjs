@@ -122,7 +122,7 @@ function refresh(s, ctx) {
   s.ticket = s.ticket ?? ticketOf(s.branch);
   const repo = git.repo ?? (s.cwd ? s.cwd.split("/").filter(Boolean).pop() : null);
   const minimal = ctx.content === "minimal";
-  const named = minimal ? null : ctx.probe.threadName(s.sessionId);
+  const named = minimal ? null : ctx.probe.threadName(s.sessionId, s.transcriptPath);
   s.title = s.fields.title ?? (named || (minimal ? repo : [repo, s.branch].filter(Boolean).join(" · ")) || "Agent session");
   if (minimal) s.branch = null;
   return before !== s.title + "|" + s.branch;
@@ -163,9 +163,13 @@ export function onHook(state, input, ctx) {
   if (!input?.session_id) return { state, events: [] };
   const s = state ? structuredClone(state) : newState(input, ctx);
   s.lastSeenAt = at;
-  s.runtimeVersion = s.runtimeVersion ?? ctx.runtimeVersion;
   if (input.transcript_path) s.transcriptPath = input.transcript_path;
   if (input.cwd) s.cwd = input.cwd;
+  // Claude Code writes its version into the transcript after the first prompt, so SessionStart may not see it yet.
+  // Once it appears, the run's start is sent again (same run, "resume") so the card shows it.
+  const version = s.runtimeVersion ?? ctx.runtimeVersion ?? ctx.probe.runtimeVersion?.(s.runtime, s.transcriptPath);
+  const learnedVersion = s.started && !s.runtimeVersion && version;
+  s.runtimeVersion = version;
   const out = [];
 
   // Until the Nudj ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
@@ -186,10 +190,12 @@ export function onHook(state, input, ctx) {
   } else if (name === "UserPromptSubmit") {
     revive(s, ctx, out);
     if (!s.explicit) enter(s, STAGES.explore, at, out);
-  } else if (name === "PostToolUse") {
+  } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     revive(s, ctx, out);
     const cmd = commandOf(input.tool_input);
-    const pushed = PR_CMD.test(cmd) && !failed(input.tool_response);
+    // Claude Code sends a failed tool call as its own event (PostToolUseFailure, with "error"), Codex inside the response.
+    const didFail = name === "PostToolUseFailure" || failed(input.tool_response);
+    const pushed = PR_CMD.test(cmd) && !didFail;
     const pr = pushed ? prFrom(input.tool_response) : null;
     if (pr) s.prNumber = pr;
     // A push or PR that failed (no remote, no auth) leaves the card where it was.
@@ -202,13 +208,13 @@ export function onHook(state, input, ctx) {
       out.push(event(s, "step.entered", { stage: s.stage }, at));
     }
     if (TEST_CMD.test(cmd)) {
-      s.fails = failed(input.tool_response) ? s.fails + 1 : 0;
+      s.fails = didFail ? s.fails + 1 : 0;
       if (s.fails === FAILS_FOR_SNAG)
         out.push(event(s, "snag.reported", { stage: s.stage ?? undefined, kind: "snag", theme: "checks failing", what: "The same checks failed " + FAILS_FOR_SNAG + " times in a row: " + cmd.slice(0, 200), costMin: null }, at));
     }
   } else if (name === "Stop") {
     revive(s, ctx, out);
-    if (refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
     else out.push(usageMarker(s, s.stage, at));
   } else if (name === "SessionEnd") {
