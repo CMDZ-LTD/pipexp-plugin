@@ -36,7 +36,9 @@ export async function fetchSteers(creds, session) {
   } catch {
     return 0;
   }
-  const got = Array.isArray(res?.body?.steers) ? res.body.steers.filter((s) => (s.kind === "note" || s.kind === "stop") && typeof s.message === "string") : [];
+  const got = Array.isArray(res?.body?.steers)
+    ? res.body.steers.filter((s) => (s.kind === "note" || s.kind === "stop" || (s.kind === "restart" && typeof s.model === "string")) && typeof s.message === "string")
+    : [];
   // An older board sends no id: every steer is new. A known id is a repeat of one this machine already has.
   const fresh = got.filter((s) => !(typeof s.steerId === "string" && seen.includes(s.steerId)));
   const ids = got.map((s) => s.steerId).filter((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id));
@@ -62,7 +64,8 @@ export async function fetchSteers(creds, session) {
 }
 
 /** True when these steers include a stop: the hook then moves the card to Waiting for you. */
-export const hasStop = (steers) => steers.some((s) => s.kind === "stop");
+// A restart ends this turn too: the new run carries on.
+export const hasStop = (steers) => steers.some((s) => s.kind === "stop" || s.kind === "restart");
 
 /** Takes the session's waiting steers out of its inbox: each is shown once. */
 export function takeSteers(sessionId) {
@@ -133,7 +136,7 @@ export function steerOutput(runtime, event, steers) {
   }
   if (!CONTEXT_EVENTS.has(event)) return "";
   const text = steers.map((s) => s.message).join("\n");
-  const stop = steers.find((s) => s.kind === "stop");
+  const stop = steers.find((s) => s.kind === "stop" || s.kind === "restart");
   if (runtime === "cursor") return JSON.stringify({ additional_context: text });
   const out = { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
   return JSON.stringify(stop && (runtime === "codex" || runtime === "claude") ? { continue: false, stopReason: stop.message, ...out } : out);

@@ -8,6 +8,7 @@
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
+//   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
 //   pipexp uninstall cursor              take PipeXP out of Cursor's hooks
@@ -20,6 +21,7 @@ import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending } from "../core/queue.mjs";
+import { restartAllowed, setRestart } from "../core/restart.mjs";
 import { currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
@@ -101,6 +103,7 @@ async function main() {
     const p = problem();
     out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
     out("Queued events: " + pending() + " · pipexp " + VERSION);
+    out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
@@ -108,6 +111,16 @@ async function main() {
     const r = await stagesFor(process.cwd());
     if (!r.lanes) return fail("no stages: " + r.reason, 1);
     return out(values.raw ? JSON.stringify({ repo: r.repo, lanes: r.lanes }) : describe(r.lanes) + (r.from === "cache" ? "\n(from the last time the board answered)" : ""));
+  }
+  if (cmd === "allow" || cmd === "deny") {
+    if (arg !== "restart") fail(cmd + " takes restart");
+    setRestart(cmd === "allow");
+    // The board greys Restart out until the machine's audit says it is on, so it goes now.
+    queueAudit(true);
+    await flushNow().catch(() => {});
+    return out(cmd === "allow"
+      ? "Restart is on: the owner of this machine's key can restart its runs on another model from the board, in the same folder and mode."
+      : "Restart is off on this machine.");
   }
   if (cmd === "disconnect") return out(disconnect() ? "Disconnected. The key is deleted from this machine; revoke it at https://pipexp.dev/setup." : "Not connected.");
   if (cmd === "content") {
@@ -145,7 +158,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

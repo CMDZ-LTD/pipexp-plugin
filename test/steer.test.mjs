@@ -131,3 +131,11 @@ test("review: a steer the board sends again (its reply was lost) is shown once, 
   assert.match(seen[1], new RegExp("&ack=" + ID));
   assert.equal(takeSteers("s-ack").length, 1);
 });
+
+test("a restart from the board ends this turn like a stop; the flush starts the new run", () => {
+  const RESTART = { kind: "restart", model: "gpt-6-sol", message: "Restarted on gpt-6-sol from the PipeXP board by sam@orbit.test. Do not call more tools; end your turn: a new run on gpt-6-sol carries on." };
+  const out = JSON.parse(steerOutput("codex", "PostToolUse", [RESTART]));
+  assert.equal(out.continue, false);
+  assert.equal(out.stopReason, RESTART.message);
+  assert.equal(steerOutput("codex", "Stop", [RESTART]), "", "at the turn's end it just ends");
+});
