@@ -1,0 +1,100 @@
+{
+  "$comment": "CMD-97: the redaction cases the board's scrubber (lib/event-schema.ts redact) passes, as lib/redaction.test.ts proves. The pipexp plugin copies this file as-is and runs its scrubber on the same inputs. {{stripe_live_example}} is Stripe's documentation key, built by lib/redaction-cases.ts (and the plugin's test) so no key-shaped string sits in either repo: GitHub push protection refuses one. in: what a sender might put in free text. out: what is stored. /security shows these cases.",
+  "cases": [
+    {
+      "name": "An env value",
+      "in": "Deploy failed: GITHUB_TOKEN=ghp_abcDEF123",
+      "out": "Deploy failed: GITHUB_TOKEN=[REDACTED]"
+    },
+    {
+      "name": "A GitHub token on its own",
+      "in": "used ghp_abcdefghijklmnop to push",
+      "out": "used [REDACTED] to push"
+    },
+    {
+      "name": "A Stripe secret key",
+      "in": "key {{stripe_live_example}} leaked",
+      "out": "key [REDACTED] leaked"
+    },
+    {
+      "name": "A PipeXP reporting key",
+      "in": "PIPEXP_KEY is pipexp_rk_Qx9Lm2",
+      "out": "PIPEXP_KEY is [REDACTED]"
+    },
+    {
+      "name": "An AWS access key",
+      "in": "AKIAIOSFODNN7EXAMPLE in logs",
+      "out": "[REDACTED] in logs"
+    },
+    {
+      "name": "A JWT",
+      "in": "cookie eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig",
+      "out": "cookie [REDACTED]"
+    },
+    {
+      "name": "A bearer token",
+      "in": "Authorization: Bearer abc.def.ghi",
+      "out": "Authorization: Bearer [REDACTED]"
+    },
+    {
+      "name": "A password in a URL",
+      "in": "postgres://app:hunter2@db.internal/app",
+      "out": "postgres://[REDACTED]@db.internal/app"
+    },
+    {
+      "name": "A private key",
+      "in": "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----",
+      "out": "[REDACTED]"
+    },
+    {
+      "name": "A home folder",
+      "in": "Failed in /Users/ana/Github/x",
+      "out": "Failed in ~/Github/x"
+    },
+    {
+      "name": "A Linux home folder",
+      "in": "cd /home/ana/src/app",
+      "out": "cd ~/src/app"
+    },
+    {
+      "name": "An email address",
+      "in": "ask ann@shop.com",
+      "out": "ask [REDACTED]"
+    },
+    {
+      "name": "An IPv4 address",
+      "in": "server at 10.0.0.4 down",
+      "out": "server at [REDACTED] down"
+    },
+    {
+      "name": "A .local machine name",
+      "in": "built on build-mac.local",
+      "out": "built on [REDACTED]"
+    },
+    {
+      "name": "A Shopify store domain",
+      "in": "on snug.myshopify.com",
+      "out": "on [REDACTED]"
+    },
+    {
+      "name": "A database id",
+      "in": "user 507f1f77bcf86cd799439011 missing",
+      "out": "user [REDACTED] missing"
+    },
+    {
+      "name": "Kept: a file name",
+      "in": "see .env.local",
+      "out": "see .env.local"
+    },
+    {
+      "name": "Kept: already redacted",
+      "in": "TOKEN=[REDACTED]",
+      "out": "TOKEN=[REDACTED]"
+    },
+    {
+      "name": "Kept: a plain sentence",
+      "in": "Flaky test in checkout",
+      "out": "Flaky test in checkout"
+    }
+  ]
+}

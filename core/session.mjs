@@ -105,6 +105,7 @@ const usageMarker = (s, stage, at) => ({
 });
 
 function startFields(s, ctx, claim) {
+  const { title: _title, ...fields } = ctx.content === "minimal" ? s.fields : {};
   return {
     title: s.title,
     owner: s.owner ?? null,
@@ -116,7 +117,7 @@ function startFields(s, ctx, claim) {
     runtimeVersion: s.runtimeVersion,
     // Cursor keeps no token counts on the machine: the board says "Tokens not reported", never 0.
     ...(s.runtime === "cursor" && { tokensReported: false }),
-    ...s.fields,
+    ...(ctx.content === "minimal" ? fields : s.fields),
   };
 }
 
@@ -138,11 +139,12 @@ function refresh(s, ctx) {
   if (s.gitBranch) s.branch = s.gitBranch;
   s.ticket = s.ticket ?? ticketOf(s.branch);
   // Who started it, once per session. Minimal content names nobody.
-  if (s.owner === undefined) s.owner = ctx.content === "minimal" ? null : (ctx.probe.githubLogin?.() ?? null);
+  if (ctx.content === "minimal") s.owner = null;
+  else if (s.owner === undefined || s.owner === null) s.owner = ctx.probe.githubLogin?.() ?? null;
   const repo = git.repo ?? (s.cwd ? s.cwd.split("/").filter(Boolean).pop() : null);
   const minimal = ctx.content === "minimal";
   const named = minimal ? null : ctx.probe.threadName(s.sessionId, s.transcriptPath);
-  s.title = s.fields.title ?? (named || (minimal ? repo : [repo, s.branch].filter(Boolean).join(" · ")) || "Agent session");
+  s.title = (minimal ? null : s.fields.title) ?? (named || (minimal ? repo : [repo, s.branch].filter(Boolean).join(" · ")) || "Agent session");
   if (minimal) s.branch = null;
   return before !== s.title + "|" + s.branch + "|" + s.ticket;
 }

@@ -11,7 +11,7 @@ import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport } from "./session.mjs";
-import { routedRepo } from "./stages.mjs";
+import { boardContent, routedRepo } from "./stages.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -38,14 +38,20 @@ export const runtimeOf = (env = process.env, argv = process.argv) => {
   return "codex";
 };
 
-export function context(runtime, transcriptPath, known, now = Date.now()) {
+/**
+ * How much this machine sends (CMD-343): minimal when either this machine (pipexp content minimal) or the project on the
+ * board says so. The board's level comes from /plugin/config, cached per repo; a machine can go stricter, never looser.
+ */
+export const contentFor = (cwd) => (settings().content === "minimal" || (cwd && boardContent(cwd) === "minimal") ? "minimal" : "standard");
+
+export function context(runtime, transcriptPath, known, now = Date.now(), cwd = null) {
   return {
     now,
     runtime,
     machineId: machine().id,
     // Read once per session: the first line of a Codex transcript can be tens of KB.
     runtimeVersion: known ?? probe.runtimeVersion(runtime, transcriptPath),
-    content: settings().content === "minimal" ? "minimal" : "standard",
+    content: contentFor(cwd),
     probe,
   };
 }
@@ -106,7 +112,7 @@ export function hook(input, runtime = runtimeOf()) {
   if (!input?.session_id) return [];
   const events = withSessionLock(input.session_id, () => {
     const existing = loadSession(input.session_id);
-    const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion);
+    const ctx = context(existing?.runtime ?? runtime, input.transcript_path, existing?.runtimeVersion, Date.now(), input.cwd ?? existing?.cwd);
     const { state, events } = onHook(existing, input, ctx);
     return commit(state, events);
   });
@@ -121,7 +127,7 @@ export function hook(input, runtime = runtimeOf()) {
 export function report(sessionId, rep, runtime = runtimeOf(), cwd = process.cwd()) {
   const { state, events } = withSessionLock(sessionId, () => {
     const existing = loadSession(sessionId);
-    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion);
+    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), existing?.cwd ?? cwd);
     // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
     const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
     const result = onReport(base, rep, ctx);

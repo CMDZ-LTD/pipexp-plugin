@@ -6,6 +6,12 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 - Notes and stops sent from a card on the board reach the agent running that session (CMD-80).
 
+## 0.1.9 (2026-09-26)
+
+- `pipexp preview` prints what this session sends next, exactly as it will go: scrubbed and at the content level (`--all` for every session, `--raw` for JSON). Nothing is sent (CMD-343).
+- A project set to minimal on the board sends minimal from every machine: no titles, branches or creator for its repo's sessions. A machine can be stricter than its project, never looser (CMD-343).
+- The scrubber passes the board's own redaction cases. It now redacts pipexp_rk_ keys, and keeps the @ in a URL with a password, as the board stores it (CMD-343).
+
 ## 0.1.8 (2026-09-26)
 
 - The Machines tab catches up at once when a fault clears: a fresh audit goes when hook trust changes or a fault the last audit showed has gone, checked at every session start and flush, not once a day (CMD-370).
