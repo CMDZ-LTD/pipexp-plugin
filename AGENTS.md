@@ -29,7 +29,7 @@ Codex first, Claude Code next, then other harnesses. Changes land through a pull
 - Once the board has served a repo's stages, events and questions from that folder carry `repo`, so they land in that repo's project; before that they go to the key's own project.
 - Connect: `POST /device/code` and `POST /device/token` (RFC 8628), page `pipexp.dev/connect` (agent-pipeline PR #69).
   Questions: `POST /questions`, `GET /questions/<id>?wait=20`.
-- Ingest URL today is the Convex site (prod `exciting-ox-380`, set as `DEFAULT_URL` in `core/connect.mjs`).
+- Ingest URL is `https://api.pipexp.dev` (`DEFAULT_URL` in `core/connect.mjs`), a custom domain on the prod Convex site. The old address (`exciting-ox-380.eu-west-1.convex.site`) still works, and machines connected there keep it.
 
 ## Test
 
