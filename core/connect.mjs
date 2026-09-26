@@ -59,7 +59,7 @@ export async function connect({ runtime = "codex", say = () => {}, open = true }
   } catch (e) {
     return { ok: false, reason: "board unreachable (" + (e.cause?.code ?? e.name) + ")" };
   }
-  if (start.status === 404) return { ok: false, reason: "this board has no device sign-in yet; make a key at " + DEFAULT_BOARD + "/setup and run: pipexp connect --key-stdin" };
+  if (start.status === 404) return { ok: false, reason: "this board has no device sign-in; make a key on its /setup page and run: pipexp connect --key-stdin" };
   if (start.status !== 200 || !start.body?.deviceCode) return { ok: false, reason: "the board refused (HTTP " + start.status + ")" };
   const { deviceCode, userCode, verificationUriComplete, expiresIn = 600 } = start.body;
   let interval = Math.max(1, start.body.interval ?? 5);

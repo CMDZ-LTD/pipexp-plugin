@@ -17,8 +17,20 @@ export const sessionFile = (id) => join(sessions(), safe(id) + ".json");
 export const loadSession = (id) => readJson(sessionFile(id));
 const settings = () => readJson(join(stateDir(), "..", "settings.json")) ?? {};
 
-/** The runtime a hook runs under. Codex sets PLUGIN_ROOT; Claude Code sets only CLAUDE_PLUGIN_ROOT. */
-export const runtimeOf = (env = process.env) => (env.PIPEXP_RUNTIME || (env.PLUGIN_ROOT || env.CODEX_THREAD_ID ? "codex" : "claude"));
+/**
+ * The runtime a hook runs under. Both harnesses load the same hooks/hooks.json, so the process tells them apart.
+ * Plugin roots decide first: Codex sets PLUGIN_ROOT, Claude Code only CLAUDE_PLUGIN_ROOT. Then Claude's own markers
+ * (CLAUDE_CODE_SESSION_ID, CLAUDECODE) beat CODEX_THREAD_ID, which leaks into a Claude started from a Codex
+ * terminal. --runtime or PIPEXP_RUNTIME override it (tests, scripts).
+ */
+export const runtimeOf = (env = process.env, argv = process.argv) => {
+  const flag = argv.indexOf("--runtime");
+  const given = flag >= 0 ? argv[flag + 1] : env.PIPEXP_RUNTIME;
+  if (given === "codex" || given === "claude") return given;
+  if (env.PLUGIN_ROOT) return "codex";
+  if (env.CLAUDE_PLUGIN_ROOT || env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return "claude";
+  return "codex";
+};
 
 export function context(runtime, transcriptPath, known, now = Date.now()) {
   return {
@@ -88,7 +100,8 @@ const real = (path) => {
  * session still counts, so a report after the turn ended lands on the same card and brings it back.
  */
 export function currentSession(cwd = process.cwd(), env = process.env) {
-  const id = env.CODEX_THREAD_ID || env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID;
+  // The harness this process runs in names the session; a Codex thread id can leak into a Claude Code shell.
+  const id = runtimeOf(env, []) === "claude" ? env.CLAUDE_CODE_SESSION_ID : env.CODEX_THREAD_ID || env.CODEX_SESSION_ID;
   if (id) return id;
   const here = real(cwd);
   let best = null;

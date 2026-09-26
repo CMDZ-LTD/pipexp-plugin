@@ -31,23 +31,50 @@ export function tail(path, bytes) {
   }
 }
 
-/** The first line of a file, reading at most max bytes. */
-export function firstLine(path, max = 512 * 1024) {
+/** The first lines of a file, reading at most max bytes (the last, possibly cut, line is dropped when the read stops early). */
+export function headLines(path, max = 512 * 1024) {
   try {
     const fd = openSync(path, "r");
     const buf = Buffer.alloc(max);
     const n = readSync(fd, buf, 0, max, 0);
     closeSync(fd);
     const s = buf.subarray(0, n).toString("utf8");
-    const nl = s.indexOf("\n");
-    return nl >= 0 ? s.slice(0, nl) : s;
+    const lines = s.split("\n");
+    if (n === max) lines.pop();
+    return lines.filter(Boolean);
   } catch {
-    return "";
+    return [];
   }
 }
 
-/** Codex's own short name for a thread, from ~/.codex/session_index.jsonl. */
-export function threadName(sessionId) {
+export const firstLine = (path, max) => headLines(path, max)[0] ?? "";
+
+const rows = (path, max) =>
+  headLines(path, max).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return {};
+    }
+  });
+
+/**
+ * The harness's own short name for a session: Codex keeps it in ~/.codex/session_index.jsonl, Claude Code writes
+ * a custom-title (or ai-title) row into the transcript. Null when there is none yet.
+ */
+export function threadName(sessionId, transcriptPath) {
+  if (transcriptPath && !transcriptPath.includes("/sessions/")) {
+    const lines = tail(transcriptPath, 256 * 1024).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!/"type":"(custom-title|ai-title|summary)"/.test(lines[i])) continue;
+      try {
+        const row = JSON.parse(lines[i]);
+        const title = row.customTitle ?? row.aiTitle ?? row.title ?? row.summary;
+        if (typeof title === "string" && title.trim()) return title.trim().slice(0, 200);
+      } catch {}
+    }
+    return null;
+  }
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
   const lines = tail(join(codexHome, "session_index.jsonl"), 256 * 1024).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -64,24 +91,24 @@ export function threadName(sessionId) {
 /** When the transcript began (ms), from its first line; undefined when unknown. */
 export function sessionStart(transcriptPath) {
   if (!transcriptPath) return undefined;
-  try {
-    const t = Date.parse(JSON.parse(firstLine(transcriptPath)).timestamp);
-    return Number.isNaN(t) ? undefined : t;
-  } catch {
-    return undefined;
+  // Codex's first line carries the time; Claude Code's first rows (queue operations) do too.
+  for (const row of rows(transcriptPath, 64 * 1024)) {
+    const t = Date.parse(row.timestamp);
+    if (!Number.isNaN(t)) return t;
   }
+  return undefined;
 }
 
 export function runtimeVersion(runtime, transcriptPath) {
   if (!transcriptPath) return undefined;
-  try {
-    const row = JSON.parse(firstLine(transcriptPath));
+  // Codex: session_meta.cli_version on line 1. Claude Code: "version" on its first user or attachment row.
+  for (const row of rows(transcriptPath, runtime === "codex" ? 512 * 1024 : 64 * 1024)) {
     const v = runtime === "codex" ? row.payload?.cli_version : row.version;
+    if (typeof v !== "string") continue;
     const out = runtime + " " + v;
-    return typeof v === "string" && /^(codex|claude) [0-9A-Za-z.+-]{1,40}$/.test(out) ? out : undefined;
-  } catch {
-    return undefined;
+    return /^(codex|claude) [0-9A-Za-z.+-]{1,40}$/.test(out) ? out : undefined;
   }
+  return undefined;
 }
 
 /**

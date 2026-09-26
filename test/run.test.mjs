@@ -20,6 +20,7 @@ test("an MCP report finds the session by folder, through a symlinked path, and a
   hook({ session_id: "s-elsewhere", cwd: tmpdir(), hook_event_name: "UserPromptSubmit" });
   assert.equal(currentSession(join(link, "src"), {}), "s-new");
   assert.equal(currentSession(real, { CODEX_THREAD_ID: "given" }), "given");
+  assert.equal(currentSession(real, { CODEX_THREAD_ID: "leaked", CLAUDE_CODE_SESSION_ID: "claude-s", CLAUDECODE: "1" }), "claude-s");
   const { events } = report("s-new", { type: "snag.reported", fields: { kind: "snag", theme: "t", what: "w", costMin: null } });
   assert.deepEqual(events.map((e) => e.type), ["run.started", "step.entered", "snag.reported"], "a finished card comes back before the snag lands");
   assert.equal(loadSession("s-new").finished, false);

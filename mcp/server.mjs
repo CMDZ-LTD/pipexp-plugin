@@ -86,9 +86,11 @@ const TOOLS = [
 // system touched is that one board (a closed world). Honest annotations let Codex run them without a prompt.
 for (const tool of TOOLS) tool.annotations = { readOnlyHint: tool.name === "pipexp_status", destructiveHint: false, openWorldHint: false, idempotentHint: tool.name === "pipexp_status" };
 
-// Codex starts this server in the plugin's folder with a bare environment (no thread id, no PWD), so the
-// agent's cwd is what finds its session. The tool descriptions ask for it.
-const sessionOf = (args) => args.session_id || (args.cwd ? currentSession(args.cwd, {}) : null);
+// Codex starts this server in the plugin's folder with a bare environment (no thread id, no PWD), so there the
+// agent's cwd finds its session. Claude Code gives the server CLAUDE_CODE_SESSION_ID, which wins when no cwd is
+// passed (it can be stale after --continue, so a given cwd still decides).
+const sessionOf = (args) =>
+  args.session_id || (args.cwd ? currentSession(args.cwd, {}) : process.env.CLAUDE_CODE_SESSION_ID || null);
 const ok = (value) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 const err = (message) => ({ content: [{ type: "text", text: message }], isError: true });
 
