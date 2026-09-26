@@ -5,7 +5,8 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Linux containers on Derek's M4 (agent-pipeline docs/ci-runners.md). Back to GitHub: ubuntu-latest.
+    runs-on: [self-hosted, m4]
     strategy:
       matrix:
         node: [18, 22]
