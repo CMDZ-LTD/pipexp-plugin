@@ -12,8 +12,9 @@ import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
-import { boardContent, routedRepo } from "./stages.mjs";
+import { boardContent, routedRepo, startContext } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
+import { restartPlan, startRestart } from "./restart.mjs";
 
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
@@ -54,6 +55,9 @@ export function context(runtime, transcriptPath, known, now = Date.now(), cwd = 
     // Read once per session: the first line of a Codex transcript can be tens of KB.
     runtimeVersion: known ?? probe.runtimeVersion(runtime, transcriptPath),
     content: contentFor(cwd),
+    // Set by a restart for the new session it starts (core/restart.mjs).
+    parentRunId: process.env.PIPEXP_PARENT_RUN || null,
+    ticket: process.env.PIPEXP_TICKET || null,
     probe,
   };
 }
@@ -70,11 +74,12 @@ function commit(state, events) {
 
 /**
  * Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's
- * steers. prFor: also look up that session's PR (CMD-427).
+ * steers. stagesCwd: also refresh that folder's lanes from the board (CMD-421), so the next session is told them.
+ * prFor: also look up that session's PR (CMD-427).
  */
-export function kick(steerFor, prFor) {
+export function kick(steerFor, stagesCwd, prFor) {
   if (process.env.PIPEXP_NO_FLUSH) return;
-  const env = { ...process.env, ...(steerFor && { PIPEXP_STEER_SESSION: steerFor }), ...(prFor && { PIPEXP_PR_SESSION: prFor }) };
+  const env = { ...process.env, ...(steerFor && { PIPEXP_STEER_SESSION: steerFor }), ...(stagesCwd && { PIPEXP_STAGES_CWD: stagesCwd }), ...(prFor && { PIPEXP_PR_SESSION: prFor }) };
   try {
     spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env }).unref();
   } catch {
@@ -134,7 +139,9 @@ export function hook(input, runtime = runtimeOf()) {
   // A live session asks the board for steers every CHECK_MS, through the detached flush, never in this hook.
   const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
   if (steer) markChecked(steer);
-  if ((events.length || steer || prFor) && credentials()) kick(steer ?? undefined, prFor ?? undefined);
+  // A session starting where the cached lanes are old or missing: the flush reads them again (CMD-421).
+  const stagesCwd = input.hook_event_name === "SessionStart" && input.cwd && startContext(input.cwd).stale ? input.cwd : null;
+  if ((events.length || steer || stagesCwd || prFor) && credentials()) kick(steer ?? undefined, stagesCwd ?? undefined, prFor ?? undefined);
   prune();
   return events;
 }
@@ -225,6 +232,34 @@ export function sweepIdle(now = Date.now()) {
     }
   } catch {}
   return moved;
+}
+
+/**
+ * Carries out a restart the board sent for this session (CMD-80), from the steers the flush just fetched: the same
+ * steer also sits in the inbox for the hook to end the turn with, and the new run starts here, once per steer id. Refused ones are logged on the old run as a snag, so the
+ * card says why nothing started.
+ */
+export function carryOutRestarts(sessionId, steers, start = startRestart) {
+  const s = loadSession(sessionId);
+  if (!s || !Array.isArray(steers)) return 0;
+  const done = new Set(s.restarted ?? []);
+  let started = 0;
+  for (const steer of steers.filter((w) => w.kind === "restart")) {
+    // One run per steer: by its id (an older board sends none: then model and message).
+    const key = steer.steerId ?? steer.model + "|" + steer.message;
+    if (done.has(key)) continue;
+    done.add(key);
+    const plan = restartPlan(s, steer);
+    const pid = plan.why ? null : start(plan, join(stateDir(), "restart-" + s.runId + ".log"));
+    const why = plan.why ?? (pid ? null : "the " + plan.file + " command could not be started on this machine");
+    report(sessionId, { type: "snag.reported", fields: { kind: why ? "snag" : "worked", theme: "restart", what: why ? "Restart on " + steer.model + " refused: " + why : "Restarted on " + steer.model + " in the same folder and mode", costMin: null } }, s.runtime, s.cwd);
+    if (!why) started++;
+  }
+  withSessionLock(sessionId, () => {
+    const now = loadSession(sessionId);
+    if (now) writeJson(sessionFile(sessionId), { ...now, restarted: [...done].slice(-20) });
+  });
+  return started;
 }
 
 // ponytail: sessions untouched for 14 days are deleted on each hook; fine at a few hundred files.

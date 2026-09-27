@@ -6,8 +6,9 @@
 //   pipexp disconnect                    forget this machine's key
 //   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
-//   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
+//   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
+//   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
 //   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
@@ -17,10 +18,11 @@
 import { parseArgs } from "node:util";
 import { credentials, home, machine, readJson, VERSION, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
-import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
+import { FIX, hooksTrusted, latestAge, latestKnown, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending, queued } from "../core/queue.mjs";
+import { restartAllowed, setRestart } from "../core/restart.mjs";
 import { contentFor, currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
@@ -50,6 +52,7 @@ const { positionals, values } = parseArgs({
     context: { type: "string" },
     option: { type: "string", multiple: true },
     "timeout-min": { type: "string" },
+    recipient: { type: "string" },
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
@@ -103,7 +106,8 @@ async function main() {
     // Line one is the whole answer: what is wrong and the fix, or that all is well.
     const p = problem();
     out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
-    out("Queued events: " + pending() + " · pipexp " + VERSION);
+    out("Queued events: " + pending() + " · pipexp " + VERSION + " · newest release " + (latestKnown() ?? "unknown") + " (" + latestAge() + ")");
+    out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
@@ -111,6 +115,16 @@ async function main() {
     const r = await stagesFor(process.cwd());
     if (!r.lanes) return fail("no stages: " + r.reason, 1);
     return out(values.raw ? JSON.stringify({ repo: r.repo, lanes: r.lanes }) : describe(r.lanes) + (r.from === "cache" ? "\n(from the last time the board answered)" : ""));
+  }
+  if (cmd === "allow" || cmd === "deny") {
+    if (arg !== "restart") fail(cmd + " takes restart");
+    setRestart(cmd === "allow");
+    // The board greys Restart out until the machine's audit says it is on, so it goes now.
+    queueAudit(true);
+    await flushNow().catch(() => {});
+    return out(cmd === "allow"
+      ? "Restart is on: the owner of this machine's key can restart its runs on another model from the board, in the same folder and mode."
+      : "Restart is off on this machine.");
   }
   if (cmd === "preview") {
     // Nothing is sent here: the outbox already holds each event as it will go, scrubbed and cut to the content level.
@@ -157,11 +171,12 @@ async function main() {
     return;
   }
   if (cmd === "ask") {
-    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || 60, questionId: values["question-id"], wait: "all" });
+    // The link goes to stderr at once, so a person nearby can answer before the wait ends; stdout stays the answer.
+    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || undefined, recipient: values.recipient, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, preview, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

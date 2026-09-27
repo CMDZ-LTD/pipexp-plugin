@@ -9,6 +9,8 @@ import { usage } from "../core/usage.mjs";
 import { hook, loadSession, sweepIdle } from "../core/run.mjs";
 import { lookUpPr } from "../core/pr.mjs";
 import { fetchSteers } from "../core/steer.mjs";
+import { stagesFor } from "../core/stages.mjs";
+import { carryOutRestarts } from "../core/run.mjs";
 
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
@@ -36,7 +38,11 @@ export async function run() {
   await checkLatest();
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
-  if (steerFor) await fetchSteers(creds, loadSession(steerFor)).catch(() => 0);
+  if (steerFor) {
+    // The steers just fetched, straight to the restart: never re-read from the inbox a hook may take in between.
+    const fresh = await fetchSteers(creds, loadSession(steerFor)).catch(() => []);
+    carryOutRestarts(steerFor, fresh);
+  }
   // A hook found this session's PR due a lookup (CMD-427). A new number goes on the card through the session's own
   // state, as a PrFound hook; that queues the event and starts one more flush to send it.
   const prFor = process.env.PIPEXP_PR_SESSION;
@@ -45,6 +51,8 @@ export async function run() {
     const number = lookUpPr(s);
     if (number && number !== s.prNumber) hook({ session_id: prFor, cwd: s.cwd, hook_event_name: "PrFound" }, s.runtime);
   }
+  // A session started where this machine's copy of the lanes is old or missing (CMD-421): read them again.
+  if (process.env.PIPEXP_STAGES_CWD) await stagesFor(process.env.PIPEXP_STAGES_CWD).catch(() => null);
   return result;
 }
 

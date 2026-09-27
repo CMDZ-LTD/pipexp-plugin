@@ -394,3 +394,36 @@ test("CMD-427: the flush asks gh for the branch's PR at most every ten minutes, 
   assert.deepEqual(calls.at(-1), ["gh", ["pr", "view", "codex/abc-12-x", "--repo", "acme/shop", "--json", "number,headRefName"], "/repo"]);
   assert.equal(lookUpPr({ ...s, gitBranch: "main" }, gh({ status: 0, stdout: "{}" })), null);
 });
+
+test("the board contract has run.started with ticket: null, which only run.started may send (CMD-452, board #344)", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"));
+  const none = fixtures["run.started (no ticket)"];
+  assert.equal(none.type, "run.started");
+  assert.equal(none.ticket, null);
+  assert.deepEqual({ ...none, ticket: undefined, eventId: undefined }, { ...fixtures["run.started"], ticket: undefined, eventId: undefined });
+  assert.ok(Object.entries(fixtures).every(([k, e]) => k === "run.started (no ticket)" || e.ticket !== null), "no other event sends ticket: null");
+});
+
+test("CMD-452: a session that moves to a branch with no ticket sends ticket: null, so the card drops the old one; one that never had a ticket sends none", () => {
+  let branch = "codex/nj-3235-old-work";
+  const c = { probe: probe({ git: () => ({ branch, repo: "shop", top: "/repo", common: "/repo/.git" }) }) };
+  const first = play([[0, { hook_event_name: "UserPromptSubmit" }]], c);
+  assert.equal(first.events.find((e) => e.type === "run.started").ticket, "NJ-3235");
+  branch = "main";
+  const back = onHook(first.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
+  const started = back.events.find((e) => e.type === "run.started");
+  assert.ok(started && "ticket" in started, "the start is resent with the ticket field");
+  assert.equal(started.ticket, null);
+  // Only run.started carries null; the board refuses it anywhere else.
+  assert.ok(back.events.filter((e) => e.type !== "run.started").every((e) => !("ticket" in e)));
+  // Every field it sends is one the board's contract fixture has, ticket: null included.
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"))["run.started (no ticket)"];
+  for (const key of Object.keys(started)) assert.ok(key in fixture || ["attemptId"].includes(key), "run.started sends " + key);
+  // A new ticket on the next branch replaces null.
+  branch = "codex/cmd-99-ship";
+  assert.equal(onHook(back.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 6 * MIN, c)).events.find((e) => e.type === "run.started").ticket, "CMD-99");
+  // A session that never had a ticket never sends the field.
+  branch = "main";
+  const plain = play([[0, { hook_event_name: "SessionStart", source: "startup" }]], c).events.find((e) => e.type === "run.started");
+  assert.ok(!("ticket" in plain));
+});

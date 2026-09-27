@@ -73,7 +73,8 @@ const TOOLS = [
         question: { type: "string" },
         context: { type: "string", description: "What they need to know to answer" },
         options: { type: "array", items: { type: "string" }, description: "Up to 6 suggested answers" },
-        timeout_min: { type: "number", description: "How long the question stays open (default 60)" },
+        recipient: { type: "string", description: "The GitHub login of the person this waits on, when you know it and it is not the person you work for" },
+        timeout_min: { type: "number", description: "How long the question stays open (default 60 minutes, or a day with a recipient)" },
         question_id: { type: "string", description: "To keep waiting on a question already asked" },
         ...where,
       },
@@ -191,9 +192,11 @@ async function callTool(name, args = {}) {
     return ok("Marked " + sent.outcome + ", " + (sent.prNumber ? "PR #" + sent.prNumber : "no PR") + ".");
   }
   if (name === "pipexp_ask_human") {
-    const r = await ask({ sessionId: id, question: args.question, context: args.context, options: args.options, timeoutMin: args.timeout_min ?? 60, questionId: args.question_id, wait: ASK_WAIT_S });
+    const r = await ask({ sessionId: id, question: args.question, context: args.context, options: args.options, timeoutMin: args.timeout_min, recipient: args.recipient, questionId: args.question_id, wait: ASK_WAIT_S });
     if (r.status === "answered") return ok({ status: "answered", answer: r.answer, answered_by: r.answeredBy });
-    if (r.status === "waiting") return ok({ status: "waiting", question_id: r.questionId, next: "No answer yet. Call pipexp_ask_human again with this question_id to keep waiting." });
+    if (r.status === "waiting") {
+      return ok({ status: "waiting", question_id: r.questionId, link: r.link, next: "No answer yet. Share the link in the chat if the person is here, then call pipexp_ask_human again with this question_id to keep waiting." });
+    }
     return err((r.reason ?? "No answer") + ". Ask in the chat instead.");
   }
   return err("Unknown tool " + name);

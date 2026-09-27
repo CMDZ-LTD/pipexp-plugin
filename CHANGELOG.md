@@ -2,7 +2,27 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.15 (2026-09-27)
+
+- A question can name who it waits on: `pipexp_ask_human` takes `recipient` and `pipexp ask` takes `--recipient`, a GitHub login (a leading @ is dropped). The board keeps such a question open a day by default, and after 4 working hours unanswered its standup shows the asker Blocked, waiting on that person (CMD-230, board #406). A login the board would refuse is refused here, before anything is asked. Minimal content sends no recipient. Without a timeout, the board now picks how long a question stays open (an hour, as before, when it names nobody).
+
+## 0.1.14 (2026-09-27)
+
+- A session start says, once a day, when events are waiting on a board it can't reach or the board refused one, with the fix (CMD-88). Before, you found out only when a card was missing. Connecting and a refused key were already said.
+- pipexp status names the newest release and how old that knowledge is. A release list read before this plugin was tagged is read again within the hour, so status no longer calls an old release the newest (CMD-370).
+- A session that moves to a branch with no ticket (back on main, say) now drops its card's old ticket: run.started carries ticket: null, which the board accepts since #344. Only then: a session that never had a ticket sends none (CMD-452).
+- A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
+- Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
+
+## 0.1.13 (2026-09-27)
+
+- A new machine connects to https://api.pipexp.dev, PipeXP's own address, instead of the Convex one (CMD-56). Machines already connected keep the address they have; both work.
+- CI first runs `scripts/secret-scan.mjs`, the board's secret scan: it fails on a private key, GitHub token, PipeXP reporting key, Stripe or Resend live key, or a long random value named like a key, and prints file, line and rule, never the value. `git config core.hooksPath scripts/hooks` runs it before each commit (CMD-471).
+- pipexp ask prints the question's own link (`Answer it here: <board>/?question=<id>`) as soon as the board has it, and pipexp_ask_human returns it while waiting, so a person nearby can answer in one tap (CMD-77).
+
+## 0.1.12 (2026-09-26)
+
+- Restart on another model from the board (CMD-80), off until this machine's owner runs `pipexp allow restart` (`pipexp deny restart` turns it off; `pipexp status` says which). Only the owner of this machine's key can ask. The run's turn ends, and a new run starts on the same ticket and a listed model, in the same folder and the same sandbox or permission mode (refused if that cannot be read), from a fixed prompt and an args list with no shell. It links back with parentRunId, and the old run's card logs it.
 
 - A session learns its branch's PR, so its run links to the merge it produced, with no gh pr create needed (CMD-427). The detached flush asks gh (never a hook, at most every ten minutes, at once after a push, never for main), and the PR rides on the run's next step. A session that ended first sends its finish again with the PR. Needs the board to accept prNumber on step.entered.
 - Each run counts the messages a person sent and how many came mid-turn (CMD-428). Counts only: the words are never read, kept or sent. Needs the board to accept humanTurns and interrupts in counters.
