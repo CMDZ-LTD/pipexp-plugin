@@ -18,7 +18,7 @@
 import { parseArgs } from "node:util";
 import { credentials, home, machine, readJson, VERSION, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
-import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
+import { FIX, hooksTrusted, latestAge, latestKnown, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { pending, queued } from "../core/queue.mjs";
@@ -105,7 +105,7 @@ async function main() {
     // Line one is the whole answer: what is wrong and the fix, or that all is well.
     const p = problem();
     out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
-    out("Queued events: " + pending() + " · pipexp " + VERSION);
+    out("Queued events: " + pending() + " · pipexp " + VERSION + " · newest release " + (latestKnown() ?? "unknown") + " (" + latestAge() + ")");
     out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;

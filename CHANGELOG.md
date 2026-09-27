@@ -4,6 +4,7 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
+- pipexp status names the newest release and how old that knowledge is. A release list read before this plugin was tagged is read again within the hour, so status no longer calls an old release the newest (CMD-370).
 - A session that moves to a branch with no ticket (back on main, say) now drops its card's old ticket: run.started carries ticket: null, which the board accepts since #344. Only then: a session that never had a ticket sends none (CMD-452).
 - A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
 - Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
