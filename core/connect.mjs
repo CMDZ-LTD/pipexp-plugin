@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 import { credentials, home, machine, osName, readJson, saveCredentials, stateDir, VERSION, writeJson } from "./config.mjs";
 import { checkUrl } from "./send.mjs";
 
-// The hosted board. PIPEXP_URL points a machine at another deployment (a dev board, a self-hosted one).
-export const DEFAULT_URL = "https://exciting-ox-380.eu-west-1.convex.site";
+// The hosted board: its own domain (CMD-56), a custom domain on the Convex site. The old Convex address still takes
+// events, so a machine connected before keeps working; /device/token hands each machine its ingest address anyway.
+// PIPEXP_URL points a machine at another deployment (a dev board, a self-hosted one).
+export const DEFAULT_URL = "https://api.pipexp.dev";
 export const DEFAULT_BOARD = "https://pipexp.dev";
 const DAY = 86_400_000;
 const CLI = fileURLToPath(new URL("../bin/pipexp.mjs", import.meta.url));
