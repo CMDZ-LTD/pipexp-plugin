@@ -138,7 +138,8 @@ export function steerOutput(runtime, event, steers) {
   if (!CONTEXT_EVENTS.has(event)) return "";
   const text = steers.map((s) => s.message).join("\n");
   const stop = steers.find((s) => s.kind === "stop" || s.kind === "restart");
-  if (runtime === "cursor") return JSON.stringify({ additional_context: text });
+  // Cursor's beforeSubmitPrompt goes on only with continue: true; without it the person's prompt could be held back.
+  if (runtime === "cursor") return JSON.stringify({ additional_context: text, ...(event === "UserPromptSubmit" && { continue: true }) });
   const out = { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
   return JSON.stringify(stop && (runtime === "codex" || runtime === "claude") ? { continue: false, stopReason: stop.message, ...out } : out);
 }

@@ -120,6 +120,9 @@ function startFields(s, ctx, claim) {
     // Cursor keeps no token counts on the machine: the board says "Tokens not reported", never 0.
     ...(s.runtime === "cursor" && { tokensReported: false }),
     ...(ctx.content === "minimal" ? fields : s.fields),
+    // The card had a ticket and this branch has none: null drops it on the board (CMD-452, board #344). Left out, the
+    // board would keep the old one; a session that never had a ticket sends none, so an older board is never refused.
+    ...(!s.ticket && s.ticketDropped && { ticket: null }),
   };
 }
 
@@ -132,7 +135,9 @@ function refresh(s, ctx) {
   const git = ctx.probe.git(s.cwd) ?? {};
   if (git.branch && git.branch !== "HEAD" && git.branch !== s.gitBranch) {
     if (s.gitBranch) {
+      const had = s.ticket;
       s.ticket = ticketOf(git.branch) ?? (s.ticketReported ? s.ticket : null);
+      if (had && !s.ticket) s.ticketDropped = true;
       s.ticketReported = s.ticketReported && !ticketOf(git.branch);
       s.prNumber = null;
     }

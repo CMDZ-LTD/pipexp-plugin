@@ -188,3 +188,22 @@ test("CMD-88: a session start says once a day when events wait on a board it can
   assert.match(JSON.parse(run.stdout).systemMessage, /board could not be reached\. Fix: check the network, then run pipexp flush$/);
   writeFileSync(join(home, "state", "flush.json"), JSON.stringify({ at: now, left: 0 }));
 });
+
+test("CMD-370: a release list read before this plugin was tagged is read again within the hour, and status says how old it is", async () => {
+  const { checkLatest, latestAge } = await import("../core/health.mjs");
+  const state = join(home, "state");
+  // Read at 13:26, when 0.1.4 was the newest tag; this plugin is newer.
+  writeFileSync(join(state, "latest.json"), JSON.stringify({ at: T, version: "0.1.4" }));
+  assert.equal(latestAge(T + 3 * 3_600_000), "read 3 h ago");
+  const asked = [];
+  const tags = async (url) => { asked.push(url); return { ok: true, json: async () => [{ name: "v" + VERSION }, { name: "v0.1.4" }] }; };
+  assert.equal(await checkLatest(T + 30 * 60_000, tags), "0.1.4", "not within the hour");
+  assert.equal(asked.length, 0);
+  assert.equal(await checkLatest(T + 3_600_001, tags), VERSION, "read again: this plugin is now the newest known");
+  assert.equal(asked.length, 1);
+  // Up to date again: back to once a day.
+  await checkLatest(T + 3 * 3_600_000, tags);
+  assert.equal(asked.length, 1);
+  writeFileSync(join(state, "latest.json"), "null");
+  assert.equal(latestAge(T), "never read");
+});

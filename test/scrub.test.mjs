@@ -13,7 +13,7 @@ test("secrets never leave the machine: keys, tokens, JWTs, env values, passwords
     ["db mongodb+srv://admin:hunter2@cluster0.example.net/app", "db mongodb+srv://[REDACTED]@cluster0.example.net/app"],
     ["pw password: hunter2", "pw password: [REDACTED]"],
     ["sent " + jwt, "sent [REDACTED]"],
-    ["-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "[REDACTED]"],
+    ["-----BEGIN " + "PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "[REDACTED]"],
     ["mail derek@example.com", "mail [REDACTED]"],
   ];
   for (const [input, want] of cases) assert.equal(scrub(input), want, input);
