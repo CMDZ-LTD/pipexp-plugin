@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- Never lose a session on a flaky network (CMD-95). The outbox keeps events for 7 days instead of 500 events, and a board that answers with a server error costs one try an hour (up to 24), so a day-long outage loses nothing. While waiting, a stage's repeated heartbeats and a run's back-to-back usage snapshots merge, so the queue stays small. Anything dropped anyway is counted and reported in the next machine audit, and the Machines tab shows it (board #465). pipexp flush --verbose lists what waits by type and age, and why it stopped; pipexp status says how old the oldest is. Types and ages only, never values.
+
 ## 0.1.16 (2026-09-27)
 
 - Sessions outside your project's repo stay off its board (CMD-374). Every event and question says where its session runs (`origin`: repo, or none for a folder with no GitHub remote). The board, since #442, no longer files such a session on your key's own project, so personal threads in other repos and scratch folders stop cluttering it. A repo with no project is no longer sent again without its repo, and its refusal is not reported as a fault. A board from before #442, which does not know origin, still gets every event and question: they go again without it.

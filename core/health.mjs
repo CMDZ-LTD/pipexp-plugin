@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { credentials, machine, osName, readJson, stateDir, underTest, VERSION, writeJson } from "./config.mjs";
 import { disconnected } from "./connect.mjs";
-import { enqueue, pending } from "./queue.mjs";
+import { droppedCount, enqueue, pending } from "./queue.mjs";
 import { restartAllowed } from "./restart.mjs";
 
 const DAY = 86_400_000;
@@ -149,6 +149,9 @@ export function audit(now = Date.now()) {
       harnesses: harnesses(),
       hooksTrusted: hooksTrusted(),
       queued: pending(),
+      // Events this machine dropped before the board took them, since the last audit the board stored (CMD-95). Sent
+      // only when there are some, so a board that predates the field keeps taking ordinary audits.
+      ...(droppedCount() > 0 && { dropped: droppedCount() }),
       lastError: problem(now)?.code ?? null,
       lastEventAt: flushNote().sentAt ?? null,
       // Whether the board may restart this machine's runs (CMD-80): the card greys Restart out where it is off.

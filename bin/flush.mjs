@@ -3,7 +3,7 @@
 // transcript just before sending, so hooks never read big files. Silent: never prints, always exits 0.
 import { credentials } from "../core/config.mjs";
 import { checkLatest, noteAudit, noteFlush, queueAudit } from "../core/health.mjs";
-import { flush } from "../core/queue.mjs";
+import { clearDropped, flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
 import { hook, loadSession, sweepIdle } from "../core/run.mjs";
@@ -15,11 +15,14 @@ import { carryOutRestarts } from "../core/run.mjs";
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
     const result = await post(creds, event);
-    if (result !== "retry") noteAudit(result === "sent");
+    if (result === "sent" || result === "refused") noteAudit(result === "sent");
+    // The board has the count of events this machine dropped: they are told (CMD-95).
+    if (result === "sent") clearDropped(event.plugin?.dropped);
     return result;
   }
-  if (!event._usage) return post(creds, event);
-  const { _usage: u, ...rest } = event;
+  // Marks for the outbox only, never sent: _beat (a heartbeat it may merge), _usage (filled in below).
+  const { _usage: u, _beat, ...rest } = event;
+  if (!u) return post(creds, rest);
   const agents = usage({ since: u.since, runtime: u.runtime, session: u.session, transcriptPath: u.transcriptPath, reported: u.reported });
   // No usage to report (no transcript, nothing since the start): nothing to send.
   if (!agents.length) return "refused";

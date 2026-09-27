@@ -270,7 +270,8 @@ export function onHook(state, input, ctx) {
     else if (s.stage && at - s.lastSentAt >= BEAT_MS) {
       // A heartbeat, so a long test run or CI wait never shows Stalled.
       s.lastSentAt = at;
-      out.push(event(s, "step.entered", extras(s, { stage: s.stage }), at));
+      // _beat: the outbox keeps only the newest heartbeat per stage while the board is out of reach (CMD-95).
+      out.push({ ...event(s, "step.entered", extras(s, { stage: s.stage }), at), _beat: true });
     }
     if (TEST_CMD.test(cmd)) {
       s.fails = didFail ? s.fails + 1 : 0;

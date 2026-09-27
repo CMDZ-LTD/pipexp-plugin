@@ -47,13 +47,42 @@ test("events queued while a flush is running are sent by that flush, never stran
   assert.equal(pending(), 0);
 });
 
-test("bounded: past MAX_FILES the oldest are dropped, and an event failing MAX_TRIES times is dropped", async () => {
-  for (let i = 0; i < MAX_FILES + 5; i++) enqueue(ev(100 + i));
-  assert.equal(pending(), MAX_FILES);
+test("kept by age: nothing younger than 7 days is dropped, older is dropped and counted; a server error uses one try an hour", async () => {
+  const { droppedCount, MAX_AGE_MS, TRY_GAP_MS } = await import("../core/queue.mjs");
+  const before = droppedCount();
+  enqueue(ev(100), ev(101));
+  const now = Date.now();
+  // Six days of the board being out of reach: nothing goes, and "retry" uses no try.
+  for (let day = 1; day <= 6; day++) await flush(async () => "retry", () => now + day * 86_400_000);
+  assert.equal(pending(), 2);
+  assert.equal(droppedCount(), before);
+  // Past 7 days both are dropped at the next flush, and counted for the next audit.
+  await flush(async () => "retry", () => now + MAX_AGE_MS + 60_000);
+  assert.equal(pending(), 0);
+  assert.equal(droppedCount(), before + 2);
+  // A board that answers 500: one try an hour, however often it flushes, and dropped after MAX_TRIES of them.
+  enqueue(ev(102));
   let calls = 0;
-  for (let i = 0; i < MAX_TRIES; i++) await flush(async () => (calls++, "retry"));
-  assert.equal(calls, MAX_TRIES);
-  assert.equal(pending(), MAX_FILES - 1);
+  const t0 = Date.now();
+  for (let i = 0; i < 10; i++) await flush(async () => (calls++, "error"), () => t0 + i * 60_000);
+  assert.equal(pending(), 1, "ten flushes inside an hour use one try");
+  for (let h = 1; h < MAX_TRIES; h++) await flush(async () => "error", () => t0 + h * TRY_GAP_MS);
+  assert.equal(pending(), 0);
+  assert.equal(droppedCount(), before + 3);
+  assert.ok(calls >= 10);
+});
+
+test("repeats merge: one heartbeat per stage and one usage snapshot per stage and attempt wait, never a stage entry", async () => {
+  const run = "33333333-3333-4333-8333-333333333333";
+  const beat = (n, stage) => ({ ...ev(200 + n, "step.entered", run), stage, _beat: true });
+  const usage = (n, stage, attemptId) => ({ ...ev(300 + n, "usage.reported", run), stage, attemptId, _usage: { since: "x" } });
+  enqueue({ ...ev(199, "step.entered", run), stage: "agent:S2" });
+  for (let i = 0; i < 20; i++) enqueue(beat(i, "agent:S2"));
+  enqueue(usage(1, "agent:S2", "A"), usage(2, "agent:S2", "A"));
+  enqueue({ ...ev(198, "step.entered", run), stage: "agent:S3" }, usage(3, "agent:S3", "A"), usage(4, "agent:S3", "A"));
+  const { queued } = await import("../core/queue.mjs");
+  const left = queued().filter((e) => e.runId === run).map((e) => e.type + " " + e.stage + (e._beat ? " beat" : ""));
+  assert.deepEqual(left, ["step.entered agent:S2", "step.entered agent:S2 beat", "usage.reported agent:S2", "step.entered agent:S3", "usage.reported agent:S3"]);
   await flush(async () => "sent");
   assert.equal(pending(), 0);
 });
