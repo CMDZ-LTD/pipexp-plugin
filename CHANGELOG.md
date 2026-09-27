@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.13 (2026-09-27)
 
 - A new machine connects to https://api.pipexp.dev, PipeXP's own address, instead of the Convex one (CMD-56). Machines already connected keep the address they have; both work.
 - CI first runs `scripts/secret-scan.mjs`, the board's secret scan: it fails on a private key, GitHub token, PipeXP reporting key, Stripe or Resend live key, or a long random value named like a key, and prints file, line and rule, never the value. `git config core.hooksPath scripts/hooks` runs it before each commit (CMD-471).
