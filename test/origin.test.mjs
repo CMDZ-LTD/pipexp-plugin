@@ -125,3 +125,24 @@ test("a manager reports its own lane, waits in manager:S4 at each turn's end, pi
   const end = onHook(s, { ...base, hook_event_name: "SessionEnd", reason: "other" }, ctx(T0 + 20 * MIN)).events.find((e) => e.type === "run.finished");
   assert.equal(end.outcome, "ready");
 });
+
+test("CMD-518: an agent-lane session that reports its own stage still waits for you at each turn's end, and picks its stage up at the next prompt", () => {
+  // Seen on prod (run 7e141035, 27 Sep): the session reported agent:S4, then every turn ended with only usage, so the
+  // card sat at Pull request for 4 hours while idle, until the 2-hour sweep moved it.
+  const T0 = Date.parse("2026-09-27T15:00:00Z");
+  const MIN = 60_000;
+  const base = { session_id: "s-agent", cwd: "/repo", transcript_path: "/t.jsonl" };
+  let s = onHook(null, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0)).state;
+  let r = onReport(s, { type: "stage", stage: "agent:S4", ticket: "ABC-1" }, ctx(T0 + MIN));
+  s = r.state;
+  const entered = [];
+  for (const [min, name] of [[2, "Stop"], [9, "UserPromptSubmit"], [10, "Stop"]]) {
+    r = onHook(s, { ...base, hook_event_name: name }, ctx(T0 + min * MIN));
+    s = r.state;
+    entered.push(...r.events.filter((e) => e.type === "step.entered").map((e) => e.stage));
+  }
+  assert.deepEqual(entered, ["agent:S5", "agent:S4", "agent:S5"]);
+  // Ended while waiting: handed back, ready.
+  const end = onHook(s, { ...base, hook_event_name: "SessionEnd", reason: "other" }, ctx(T0 + 20 * MIN)).events.find((e) => e.type === "run.finished");
+  assert.equal(end.outcome, "ready");
+});

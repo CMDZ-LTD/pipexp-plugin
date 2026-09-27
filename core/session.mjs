@@ -28,6 +28,9 @@ export function snagFields(f = {}) {
 }
 // A manager's own lane (CMD-374): a session that reports manager:Sx waits there, never in a builder's stage.
 export const MANAGER_WAITING = "manager:S4";
+// Each lane with a stage that waits on its person, and the stage it goes back to when none was remembered.
+const WAITING = { agent: STAGES.waiting, manager: MANAGER_WAITING };
+const RESUME = { agent: STAGES.explore, manager: "manager:S1" };
 const BEAT_MS = 30 * 60_000;
 // A tool call may move the card at most once a minute, so a fix-test loop does not flood the board.
 const DWELL_MS = 60_000;
@@ -270,8 +273,8 @@ export function onHook(state, input, ctx) {
     if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
-    // A manager back from waiting picks up the stage it was in (CMD-374).
-    else if (s.skill === "manager" && s.stage === MANAGER_WAITING) enter(s, s.managerStage ?? "manager:S1", at, out);
+    // Back from waiting, a session that reports its own stages picks up the one it was in (CMD-374, CMD-518).
+    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage ?? RESUME[s.skill], at, out);
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
     // Done (CMD-370: a finish was undone 144 ms later). The next prompt, or an explicit report, brings it back.
@@ -306,9 +309,11 @@ export function onHook(state, input, ctx) {
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
-    else if (s.skill === "manager") {
-      if (s.stage !== MANAGER_WAITING) s.managerStage = s.stage;
-      enter(s, MANAGER_WAITING, at, out);
+    // The agent and manager lanes have their own Waiting for you, so an idle turn never shows as working (CMD-518).
+    // managerStage: the stage to pick up at the next prompt, for either lane (the name predates the agent lane).
+    else if (WAITING[s.skill]) {
+      if (s.stage !== WAITING[s.skill]) s.managerStage = s.stage;
+      enter(s, WAITING[s.skill], at, out);
     }
     else out.push(usageMarker(s, s.stage, at));
   } else if (name === "SessionEnd") {
@@ -317,7 +322,7 @@ export function onHook(state, input, ctx) {
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
     // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
     // (closed, killed) is abandoned. A skill run that never reported its own finish did not complete.
-    const handedBack = s.prNumber || (!s.explicit && s.stage === STAGES.waiting) || s.stage === MANAGER_WAITING;
+    const handedBack = s.prNumber || s.stage === STAGES.waiting || s.stage === MANAGER_WAITING;
     s.outcome = handedBack ? "ready" : "abandoned";
     out.push(event(s, "run.finished", { outcome: s.outcome, prNumber: s.prNumber }, at));
     s.finished = true;
