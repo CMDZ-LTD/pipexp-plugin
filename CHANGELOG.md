@@ -2,6 +2,11 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
+- Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
+
 ## 0.1.13 (2026-09-27)
 
 - A new machine connects to https://api.pipexp.dev, PipeXP's own address, instead of the Convex one (CMD-56). Machines already connected keep the address they have; both work.
