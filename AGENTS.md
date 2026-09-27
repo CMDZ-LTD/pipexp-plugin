@@ -27,13 +27,15 @@ Codex first, Claude Code next, then other harnesses. Changes land through a pull
   fields are refused). `test/fixtures/board-contract.json` mirrors agent-pipeline `lib/plugin-contract.test.ts`; change both together.
 - Lanes and stages come from `GET <ingest>/plugin/config?repo=owner/name` (the project's own, set in the board's Settings > Pipeline; `core/stages.mjs`, cached per repo). The plugin's own lane is `agent` (S1 Explore to S5 Waiting for you). `test/fixtures/plugin-config.json` mirrors the board's answer.
 - Once the board has served a repo's stages, events and questions from that folder carry `repo`, so they land in that repo's project; before that they go to the key's own project.
+- Every event and question also carries `origin` (CMD-374, board #442): `repo` in a GitHub checkout, `none` elsewhere. The board never files such an event on the key's own project: a repo with no project, or no repo at all, is refused (403) unless the run is already on a board. `core/send.mjs` drops that 403 quietly and never resends it without `repo`. The board still takes events with no `origin` as before. A board that does not know `origin` refuses it (400, unrecognized key); `unknownOrigin` in `core/send.mjs` spots that answer, and the event or question is sent again without it.
 - Connect: `POST /device/code` and `POST /device/token` (RFC 8628), page `pipexp.dev/connect` (agent-pipeline PR #69).
   Questions: `POST /questions`, `GET /questions/<id>?wait=20`.
-- Ingest URL today is the Convex site (prod `exciting-ox-380`, set as `DEFAULT_URL` in `core/connect.mjs`).
+- Ingest URL is `https://api.pipexp.dev` (`DEFAULT_URL` in `core/connect.mjs`), a custom domain on the prod Convex site. The old address (`exciting-ox-380.eu-west-1.convex.site`) still works, and machines connected there keep it.
 
 ## Test
 
 - `npm test`. Tests run with a temp `PIPEXP_HOME` and a fake board on localhost; the sender refuses any other host under test.
+- CI first runs `node scripts/secret-scan.mjs` (CMD-471, the board's CMD-469 scan): a private key, GitHub token, reporting key, Stripe or Resend live key, or long random value named like a key fails it, printed as file, line and rule only. Turn it on before each commit with `git config core.hooksPath scripts/hooks`. A test fake: build it at run time (`test/secret-scan.test.mjs`); only if it can't be, list the file in `scripts/secret-scan-allow.txt`. Keep the scanner byte-identical with the board's `scripts/secret-scan.mjs`.
 - End to end against a dev board: set `PIPEXP_URL` and `PIPEXP_KEY` (read from `~/.config/pipexp/dev-credentials.json`,
   never print the key), pipe hook JSON into `node hooks/pipexp-hook.mjs`, then `node bin/flush.mjs`.
 - Gotcha: real Codex transcripts are 5 to 25 MB. Hooks never read them; only the flusher does, and `usage.mjs` reads

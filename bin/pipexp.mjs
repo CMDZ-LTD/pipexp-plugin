@@ -6,7 +6,7 @@
 //   pipexp disconnect                    forget this machine's key
 //   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
-//   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
+//   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
 //   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
@@ -18,7 +18,7 @@
 import { parseArgs } from "node:util";
 import { credentials, home, machine, readJson, VERSION, writeJson } from "../core/config.mjs";
 import { connect, disconnect, saveKey } from "../core/connect.mjs";
-import { FIX, hooksTrusted, problem, queueAudit } from "../core/health.mjs";
+import { FIX, hooksTrusted, latestAge, latestKnown, problem, queueAudit } from "../core/health.mjs";
 import { installCursor, installOpencode, uninstallCursor } from "../core/install.mjs";
 import { ask } from "../core/ask.mjs";
 import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
@@ -54,6 +54,7 @@ const { positionals, values } = parseArgs({
     context: { type: "string" },
     option: { type: "string", multiple: true },
     "timeout-min": { type: "string" },
+    recipient: { type: "string" },
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
@@ -109,7 +110,7 @@ async function main() {
     const p = problem();
     out(p ? p.line : "Working: " + machine().name + " reports to " + new URL(c.url).host + " (" + c.source + ")");
     const w = waiting();
-    out("Queued events: " + w.total + (w.total ? " (oldest " + age(w.oldestMs) + "; pipexp flush --verbose says why)" : "") + " · pipexp " + VERSION);
+    out("Queued events: " + w.total + (w.total ? " (oldest " + age(w.oldestMs) + "; pipexp flush --verbose says why)" : "") + " · pipexp " + VERSION + " · newest release " + (latestKnown() ?? "unknown") + " (" + latestAge() + ")");
     out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
@@ -183,7 +184,8 @@ async function main() {
     return;
   }
   if (cmd === "ask") {
-    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || 60, questionId: values["question-id"], wait: "all" });
+    // The link goes to stderr at once, so a person nearby can answer before the wait ends; stdout stays the answer.
+    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || undefined, recipient: values.recipient, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }

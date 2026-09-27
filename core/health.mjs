@@ -54,6 +54,13 @@ export const newer = (a, b) => {
 };
 /** The newest released version known on this machine, or null when it has not been read yet. */
 export const latestKnown = () => readJson(join(stateDir(), "latest.json"))?.version ?? null;
+/** "read 3 h ago" or "never read": how old the newest-release knowledge is, for status. */
+export function latestAge(now = Date.now()) {
+  const at = readJson(join(stateDir(), "latest.json"))?.at;
+  if (!at) return "never read";
+  const h = Math.floor((now - at) / HOUR);
+  return "read " + (h < 1 ? "under an hour" : h < 48 ? h + " h" : Math.floor(h / 24) + " days") + " ago";
+}
 /** True only when a released version is known and ahead of this one. */
 export const behind = (latest = latestKnown()) => !!latest && newer(latest, VERSION);
 
@@ -61,7 +68,11 @@ export const behind = (latest = latestKnown()) => !!latest && newer(latest, VERS
 export async function checkLatest(now = Date.now(), get = fetch) {
   const file = join(stateDir(), "latest.json");
   if (underTest() && get === fetch) return latestKnown();
-  if (now - (readJson(file)?.at ?? 0) < DAY) return latestKnown();
+  // Known to be out of date: this plugin is newer than the newest release read (read before it was tagged). Read again,
+  // at most once an hour, so status never calls an old release the newest (CMD-370).
+  const known = readJson(file);
+  const wait = known?.version && newer(VERSION, known.version) ? HOUR : DAY;
+  if (now - (known?.at ?? 0) < wait) return latestKnown();
   try {
     const res = await get(RELEASES, { headers: { accept: "application/vnd.github+json", "user-agent": "pipexp-plugin" }, signal: AbortSignal.timeout(5000) });
     const tags = res.ok ? await res.json() : [];
@@ -186,6 +197,23 @@ export function noteFlush(result, now = Date.now()) {
   try {
     writeJson(join(stateDir(), "flush.json"), { at: now, left: result.left, sentAt: result.sent ? new Date(now).toISOString() : (flushNote().sentAt ?? null) });
   } catch {}
+}
+
+/**
+ * What a session start tells the person about sending, beyond connecting (connect.mjs notice): events waiting on a board
+ * it cannot reach, or an event the board refused, with the fix. Once a day for each (CMD-88), so a board that is down
+ * is known at the next session, not when a card turns out to be missing. Empty when all is well.
+ */
+export function startNotice(now = Date.now()) {
+  const p = problem(now);
+  if (!p || (p.code !== "board_unreachable" && p.code !== "event_refused")) return "";
+  const file = join(stateDir(), "start-notice.json");
+  const told = readJson(file) ?? {};
+  if (now - (told[p.code] ?? 0) < DAY) return "";
+  try {
+    writeJson(file, { ...told, [p.code]: now });
+  } catch {}
+  return "PipeXP: " + p.line;
 }
 
 /** The untrusted-hooks line, at most once a day: a session whose hooks do not run has no other way to hear it. */

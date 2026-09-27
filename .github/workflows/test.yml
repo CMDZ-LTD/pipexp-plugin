@@ -12,8 +12,13 @@ jobs:
         node: [18, 22]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The secret scan reads every commit a pull request adds.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      # CMD-471: no key-shaped string in any tracked file, nor in any commit a pull request adds. First, so a leak fails fast.
+      - run: node scripts/secret-scan.mjs ${{ github.event_name == 'pull_request' && format('--commits {0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || '' }}
       - run: git config --global user.email ci@pipexp.dev && git config --global user.name ci
       - run: npm test

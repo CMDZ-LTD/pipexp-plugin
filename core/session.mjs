@@ -5,16 +5,20 @@ import { VERSION } from "./config.mjs";
 
 // The board's "agent" lane (GET /plugin/config). Explicit reports may name any lane's stage instead.
 export const STAGES = { explore: "agent:S1", build: "agent:S2", test: "agent:S3", pr: "agent:S4", waiting: "agent:S5" };
+// A manager's own lane (CMD-374): a session that reports manager:Sx waits there, never in a builder's stage.
+export const MANAGER_WAITING = "manager:S4";
 const BEAT_MS = 30 * 60_000;
 // A tool call may move the card at most once a minute, so a fix-test loop does not flood the board.
 const DWELL_MS = 60_000;
 const FAILS_FOR_SNAG = 3;
+// The board caps human-turn counts here (lib/event-schema.ts counters).
+const MAX_TURNS = 10_000;
 
 // Edit tools by agent: Codex apply_patch; Claude Code and Cursor Edit, Write, MultiEdit, StrReplace; Gemini CLI
 // write_file, replace; OpenCode edit, write, patch.
 const EDIT_TOOLS = /^(apply_patch|Edit|Write|MultiEdit|NotebookEdit|StrReplace|write_file|replace|edit|write|patch)$/;
 const SWITCH_CMD = /\bgit\s+(checkout|switch)\b|\bgh\s+pr\s+checkout\b/;
-const PR_CMD = /\bgh\s+pr\s+(create|ready)\b|\bgit\s+push\b/;
+export const PR_CMD = /\bgh\s+pr\s+(create|ready)\b|\bgit\s+push\b/;
 const TEST_CMD =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|typecheck|lint|build|check|e2e)\b|\b(npx\s+)?(vitest|jest|pytest|playwright|mocha|tsc|eslint|rspec|phpunit)\b|\bcargo\s+(test|check|clippy|build)\b|\bgo\s+(test|vet|build)\b|\b(gradle|mvn|dotnet)\s+test\b|\bnode\s+--test\b|\bmake\s+(test|check)\b/;
 const NOT_TICKETS = new Set(["UTF", "SHA", "ISO", "MD", "PR", "ISSUE", "FEAT", "FIX", "CHORE", "RELEASE", "HOTFIX", "BUGFIX", "SPRINT", "WEEK", "DAY", "PHASE", "STEP", "PART"]);
@@ -84,6 +88,10 @@ export function newState(input, ctx) {
     explicit: false,
     shipOwned: false,
     prNumber: null,
+    // Human turns (CMD-428): counts only. A prompt's text is never read, kept or sent.
+    turns: 0,
+    interrupts: 0,
+    inTurn: false,
     // Started by a restart from the board (CMD-80): linked to the run it replaced, on the same ticket.
     fields: /^[0-9a-f-]{36}$/i.test(ctx.parentRunId ?? "") ? { parentRunId: ctx.parentRunId } : {},
     fails: 0,
@@ -120,6 +128,9 @@ function startFields(s, ctx, claim) {
     // Cursor keeps no token counts on the machine: the board says "Tokens not reported", never 0.
     ...(s.runtime === "cursor" && { tokensReported: false }),
     ...(ctx.content === "minimal" ? fields : s.fields),
+    // The card had a ticket and this branch has none: null drops it on the board (CMD-452, board #344). Left out, the
+    // board would keep the old one; a session that never had a ticket sends none, so an older board is never refused.
+    ...(!s.ticket && s.ticketDropped && { ticket: null }),
   };
 }
 
@@ -132,7 +143,9 @@ function refresh(s, ctx) {
   const git = ctx.probe.git(s.cwd) ?? {};
   if (git.branch && git.branch !== "HEAD" && git.branch !== s.gitBranch) {
     if (s.gitBranch) {
+      const had = s.ticket;
       s.ticket = ticketOf(git.branch) ?? (s.ticketReported ? s.ticket : null);
+      if (had && !s.ticket) s.ticketDropped = true;
       s.ticketReported = s.ticketReported && !ticketOf(git.branch);
       s.prNumber = null;
     }
@@ -151,8 +164,16 @@ function refresh(s, ctx) {
   return before !== s.title + "|" + s.branch + "|" + s.ticket;
 }
 
+/** What rides on every step.entered: the session's PR and its human-turn counts, when known (CMD-427, CMD-428). */
+function extras(s, extra) {
+  const turns = s.turns ? { humanTurns: Math.min(s.turns, MAX_TURNS), interrupts: Math.min(s.interrupts ?? 0, MAX_TURNS) } : null;
+  const counters = turns || extra.counters ? { ...turns, ...extra.counters } : undefined;
+  return { ...(s.prNumber && { prNumber: s.prNumber }), ...extra, ...(counters && { counters }) };
+}
+
 function enter(s, stage, at, out, extra = {}, force = false) {
   if (!force && s.stage === stage && !Object.keys(extra).length) return;
+  extra = extras(s, extra);
   // Usage for the stage being left, so the board splits a run's tokens by stage (the sender reads the transcript).
   if (s.stage && s.stage !== stage && s.stage.startsWith(s.skill + ":")) out.push(usageMarker(s, s.stage, at));
   s.stage = stage;
@@ -184,8 +205,10 @@ export function onHook(state, input, ctx) {
   const at = ctx.now;
   const name = input?.hook_event_name;
   if (!input?.session_id) return { state, events: [] };
+  if (name === "PrFound" && !state) return { state, events: [] };
   const s = state ? structuredClone(state) : newState(input, ctx);
-  s.lastSeenAt = at;
+  // PrFound comes from the flush, not the agent: it says nothing about whether the session is still going.
+  if (name !== "PrFound") s.lastSeenAt = at;
   if (input.transcript_path) s.transcriptPath = input.transcript_path;
   if (input.cwd) s.cwd = input.cwd;
   // An agent with no transcript (OpenCode) sends its own running token total with its hooks.
@@ -196,6 +219,10 @@ export function onHook(state, input, ctx) {
   const learnedVersion = s.started && !s.runtimeVersion && version;
   s.runtimeVersion = version;
   const out = [];
+  // The PR the flush found for this branch (core/pr.mjs): the card links to it from its next step.
+  const known = s.gitBranch ? ctx.probe.pr?.(s.sessionId, s.gitBranch) : null;
+  const learnedPr = !!known && known !== s.prNumber;
+  if (learnedPr) s.prNumber = known;
 
   // Until a ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
   // Checked at turn edges and when a tool call runs ship's claim script, so other tool calls never pay for it.
@@ -214,9 +241,16 @@ export function onHook(state, input, ctx) {
     if (!s.stage) enter(s, STAGES.explore, at, out);
   } else if (name === "UserPromptSubmit") {
     const was = s.started && !s.finished;
+    // A person wrote to the agent. One sent while a turn was still running (no Stop since the last) interrupted it.
+    s.turns = (s.turns ?? 0) + 1;
+    if (s.inTurn) s.interrupts = (s.interrupts ?? 0) + 1;
+    s.inTurn = true;
     revive(s, ctx, out);
     if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
+    // A manager back from waiting picks up the stage it was in (CMD-374).
+    else if (s.skill === "manager" && s.stage === MANAGER_WAITING) enter(s, s.managerStage ?? "manager:S1", at, out);
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
     // Done (CMD-370: a finish was undone 144 ms later). The next prompt, or an explicit report, brings it back.
@@ -237,7 +271,7 @@ export function onHook(state, input, ctx) {
       // A heartbeat, so a long test run or CI wait never shows Stalled.
       s.lastSentAt = at;
       // _beat: the outbox keeps only the newest heartbeat per stage while the board is out of reach (CMD-95).
-      out.push({ ...event(s, "step.entered", { stage: s.stage }, at), _beat: true });
+      out.push({ ...event(s, "step.entered", extras(s, { stage: s.stage }), at), _beat: true });
     }
     if (TEST_CMD.test(cmd)) {
       s.fails = didFail ? s.fails + 1 : 0;
@@ -246,10 +280,15 @@ export function onHook(state, input, ctx) {
     }
   } else if (name === "Stop") {
     // The turn that finished the card ends: nothing to add.
+    s.inTurn = false;
     if (s.finished) return { state: s, events: [] };
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
+    else if (s.skill === "manager") {
+      if (s.stage !== MANAGER_WAITING) s.managerStage = s.stage;
+      enter(s, MANAGER_WAITING, at, out);
+    }
     else out.push(usageMarker(s, s.stage, at));
   } else if (name === "SessionEnd") {
     if (!s.started || s.finished) return { state: s, events: [] };
@@ -257,11 +296,18 @@ export function onHook(state, input, ctx) {
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
     // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
     // (closed, killed) is abandoned. A skill run that never reported its own finish did not complete.
-    const handedBack = s.prNumber || (!s.explicit && s.stage === STAGES.waiting);
-    out.push(event(s, "run.finished", { outcome: handedBack ? "ready" : "abandoned", prNumber: s.prNumber }, at));
+    const handedBack = s.prNumber || (!s.explicit && s.stage === STAGES.waiting) || s.stage === MANAGER_WAITING;
+    s.outcome = handedBack ? "ready" : "abandoned";
+    out.push(event(s, "run.finished", { outcome: s.outcome, prNumber: s.prNumber }, at));
     s.finished = true;
-  } else {
+  } else if (name !== "PrFound") {
     return { state: s, events: [] };
+  }
+  // A PR learned with nothing else to send: one step.entered for the stage the card is in carries it.
+  if (learnedPr && s.started && !out.some((e) => e.type === "step.entered" || e.type === "run.finished")) {
+    // A finished run is not reopened: its finish is sent again with the PR (the push landed after the session ended).
+    if (s.finished) s.outcome && out.push(event(s, "run.finished", { outcome: s.outcome, prNumber: s.prNumber }, at));
+    else if (s.stage) enter(s, s.stage, at, out, {}, true);
   }
   return { state: s, events: out };
 }
@@ -342,7 +388,7 @@ export function onReport(state, report, ctx) {
   return { state: s, events: out };
 }
 
-/** How long an agent-lane card may sit with no hook before it shows Waiting for you (CMD-370). */
+/** How long an agent- or manager-lane card may sit with no hook before it shows Waiting for you (CMD-370, CMD-374). */
 export const IDLE_MS = 2 * 3_600_000;
 
 /**
@@ -351,11 +397,12 @@ export const IDLE_MS = 2 * 3_600_000;
  * prompt moves it on. Skill lanes (ship and the rest) keep their stage: a stalled skill step means something.
  */
 export function onIdle(state, now) {
-  if (!state?.started || state.finished || state.shipOwned || state.skill !== "agent" || state.stage === STAGES.waiting || now - state.lastSeenAt < IDLE_MS) {
+  const waiting = state?.skill === "manager" ? MANAGER_WAITING : STAGES.waiting;
+  if (!state?.started || state.finished || state.shipOwned || (state.skill !== "agent" && state.skill !== "manager") || state.stage === waiting || now - state.lastSeenAt < IDLE_MS) {
     return { state, events: [] };
   }
   const s = structuredClone(state);
   const out = [];
-  enter(s, STAGES.waiting, now, out);
+  enter(s, waiting, now, out);
   return { state: s, events: out };
 }

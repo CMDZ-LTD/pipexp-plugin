@@ -56,9 +56,13 @@ export function adapt(runtime, input, env = process.env) {
   return input;
 }
 
-/** What a SessionStart hook may print for each agent: Cursor's sessionStart takes additional_context only. */
-export function noticeOutput(runtime, message) {
-  if (!message) return "";
-  if (runtime === "cursor") return JSON.stringify({ additional_context: message });
-  return JSON.stringify({ systemMessage: message });
+/**
+ * What a SessionStart hook may print for each agent: a notice for the person, and context for the agent (this repo's
+ * stages, CMD-421). Cursor's sessionStart takes additional_context only; the rest take systemMessage and
+ * hookSpecificOutput.additionalContext.
+ */
+export function noticeOutput(runtime, message, context = "") {
+  if (!message && !context) return "";
+  if (runtime === "cursor") return JSON.stringify({ additional_context: [message, context].filter(Boolean).join("\n") });
+  return JSON.stringify({ ...(message && { systemMessage: message }), ...(context && { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } }) });
 }

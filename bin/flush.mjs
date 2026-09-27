@@ -6,8 +6,10 @@ import { checkLatest, noteAudit, noteFlush, queueAudit } from "../core/health.mj
 import { clearDropped, flush } from "../core/queue.mjs";
 import { post } from "../core/send.mjs";
 import { usage } from "../core/usage.mjs";
-import { loadSession, sweepIdle } from "../core/run.mjs";
+import { hook, loadSession, sweepIdle } from "../core/run.mjs";
+import { lookUpPr } from "../core/pr.mjs";
 import { fetchSteers } from "../core/steer.mjs";
+import { stagesFor } from "../core/stages.mjs";
 import { carryOutRestarts } from "../core/run.mjs";
 
 export async function sendOne(creds, event) {
@@ -44,6 +46,16 @@ export async function run() {
     const fresh = await fetchSteers(creds, loadSession(steerFor)).catch(() => []);
     carryOutRestarts(steerFor, fresh);
   }
+  // A hook found this session's PR due a lookup (CMD-427). A new number goes on the card through the session's own
+  // state, as a PrFound hook; that queues the event and starts one more flush to send it.
+  const prFor = process.env.PIPEXP_PR_SESSION;
+  const s = prFor ? loadSession(prFor) : null;
+  if (s) {
+    const number = lookUpPr(s);
+    if (number && number !== s.prNumber) hook({ session_id: prFor, cwd: s.cwd, hook_event_name: "PrFound" }, s.runtime);
+  }
+  // A session started where this machine's copy of the lanes is old or missing (CMD-421): read them again.
+  if (process.env.PIPEXP_STAGES_CWD) await stagesFor(process.env.PIPEXP_STAGES_CWD).catch(() => null);
   return result;
 }
 

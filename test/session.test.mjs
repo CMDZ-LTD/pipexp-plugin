@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ctx, probe } from "./helpers.mjs";
+import { ctx, freshHome, probe } from "./helpers.mjs";
+freshHome();
 import { IDLE_MS, onHook, onIdle, onReport, stageForTool, ticketOf, uuid5 } from "../core/session.mjs";
 import { VERSION } from "../core/config.mjs";
 
@@ -158,7 +159,7 @@ test("a skill reporting ship stages moves the run into the ship lane, with its f
   assert.deepEqual(tool.events, []);
   const next = onReport(tool.state, { type: "stage", stage: "ship:S4", fields: { counters: { reviewRound: 2 } } }, ctx(T0 + 9 * MIN));
   assert.deepEqual(brief(next.events), ["usage.reported ship:S1", "step.entered ship:S4"]);
-  assert.deepEqual(next.events[1].counters, { reviewRound: 2 });
+  assert.deepEqual(next.events[1].counters, { humanTurns: 1, interrupts: 0, reviewRound: 2 });
 });
 
 test("while ship's own scripts hold a claim on the session, a stage report adds nothing (no second card)", () => {
@@ -321,4 +322,108 @@ test("CMD-370: after a finish, that turn's tool calls and its end leave the card
   assert.deepEqual(stop.events, []);
   const next = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 60 * MIN));
   assert.deepEqual(brief(next.events).slice(0, 1), ["run.started"]);
+});
+
+test("CMD-428: human turns and interrupts are counted, and no prompt text is in any event or the saved state", () => {
+  const SECRET = "refund the loyalty points for orbit-customer-77";
+  const { events, state } = play([
+    [0, { hook_event_name: "SessionStart", source: "startup" }],
+    [0, { hook_event_name: "UserPromptSubmit", prompt: SECRET }],
+    [1, { hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }],
+    // Sent while the turn was still running: an interrupt.
+    [2, { hook_event_name: "UserPromptSubmit", prompt: SECRET + " now" }],
+    [3, { hook_event_name: "Stop" }],
+    [5, { hook_event_name: "UserPromptSubmit", prompt: "and " + SECRET }],
+    [6, { hook_event_name: "Stop" }],
+  ]);
+  assert.equal(state.turns, 3);
+  assert.equal(state.interrupts, 1);
+  const last = events.filter((e) => e.type === "step.entered").at(-1);
+  assert.equal(last.stage, "agent:S5");
+  assert.deepEqual(last.counters, { humanTurns: 3, interrupts: 1 });
+  assert.doesNotMatch(JSON.stringify(events), /refund|orbit-customer|loyalty/);
+  assert.doesNotMatch(JSON.stringify(state), /refund|orbit-customer|loyalty/);
+});
+
+test("CMD-427: a session learns its branch's PR from the flush's lookup; the card links to it at once, and a finished run's finish is sent again", () => {
+  let pr = null;
+  const c = { probe: probe({ pr: (_sid, branch) => (branch === "codex/abc-12-fix-login" ? pr : null) }) };
+  const first = play([
+    [0, { hook_event_name: "SessionStart", source: "startup" }],
+    [1, { hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }],
+  ], c);
+  assert.ok(first.events.every((e) => e.prNumber === undefined));
+  // The flush found PR 57 (a push to a branch with an open PR, no gh pr create in this session).
+  pr = 57;
+  const learned = onHook(first.state, { ...base, hook_event_name: "PrFound" }, ctx(T0 + 2 * MIN, c));
+  assert.deepEqual(learned.events.map((e) => [e.type, e.stage, e.prNumber]), [["step.entered", "agent:S2", 57]]);
+  // Known already: nothing to resend.
+  assert.deepEqual(onHook(learned.state, { ...base, hook_event_name: "PrFound" }, ctx(T0 + 3 * MIN, c)).events, []);
+  // A session that ended before the lookup answered: its finish goes again with the PR, and the card stays finished.
+  pr = null;
+  const done = play([
+    [0, { hook_event_name: "SessionStart", source: "startup" }],
+    [1, { hook_event_name: "Stop" }],
+    [2, { hook_event_name: "SessionEnd", reason: "other" }],
+  ], c);
+  pr = 58;
+  const late = onHook(done.state, { ...base, hook_event_name: "PrFound" }, ctx(T0 + 3 * MIN, c));
+  assert.deepEqual(late.events.map((e) => [e.type, e.outcome, e.prNumber]), [["run.finished", "ready", 58]]);
+  assert.equal(late.state.finished, true);
+});
+
+test("CMD-427: the flush asks gh for the branch's PR at most every ten minutes, at once after a push, never for main", async () => {
+  const { cachedPr, lookUpPr, markPrChecked, prDue, CHECK_MS } = await import("../core/pr.mjs");
+  const calls = [];
+  const gh = (answer) => (cmd, args, opts) => { calls.push([cmd, args, opts.cwd]); return answer; };
+  const s = { sessionId: "pr-1", cwd: "/repo", gitBranch: "codex/abc-12-x" };
+  assert.equal(prDue("pr-1", "main"), false);
+  assert.equal(prDue("pr-1", "codex/abc-12-x", false, T0), true, "a branch never looked up");
+  markPrChecked("pr-1", "codex/abc-12-x", T0);
+  assert.equal(prDue("pr-1", "codex/abc-12-x", false, T0 + MIN), false, "asked a minute ago");
+  assert.equal(prDue("pr-1", "codex/abc-12-x", true, T0 + MIN), true, "a push asks again");
+  const repo = () => "acme/shop";
+  assert.equal(lookUpPr(s, gh({ status: 1, stdout: "" }), T0, repo), null, "no PR yet");
+  assert.equal(prDue("pr-1", "codex/abc-12-x", false, T0 + CHECK_MS), true);
+  // gh answers with another branch's PR (a fork's same-named branch): not this session's.
+  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 9, headRefName: "other" }) }), T0, repo), null);
+  assert.equal(lookUpPr(s, gh({ status: 0, stdout: JSON.stringify({ number: 57, headRefName: "codex/abc-12-x" }) }), T0, repo), 57);
+  assert.equal(cachedPr("pr-1", "codex/abc-12-x"), 57);
+  assert.equal(cachedPr("pr-1", "codex/other"), null, "another branch has not been looked up");
+  assert.equal(prDue("pr-1", "codex/abc-12-x", true, T0 + CHECK_MS * 10), false, "found: never asked again for this branch");
+  assert.deepEqual(calls.at(-1), ["gh", ["pr", "view", "codex/abc-12-x", "--repo", "acme/shop", "--json", "number,headRefName"], "/repo"]);
+  assert.equal(lookUpPr({ ...s, gitBranch: "main" }, gh({ status: 0, stdout: "{}" })), null);
+});
+
+test("the board contract has run.started with ticket: null, which only run.started may send (CMD-452, board #344)", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"));
+  const none = fixtures["run.started (no ticket)"];
+  assert.equal(none.type, "run.started");
+  assert.equal(none.ticket, null);
+  assert.deepEqual({ ...none, ticket: undefined, eventId: undefined }, { ...fixtures["run.started"], ticket: undefined, eventId: undefined });
+  assert.ok(Object.entries(fixtures).every(([k, e]) => k === "run.started (no ticket)" || e.ticket !== null), "no other event sends ticket: null");
+});
+
+test("CMD-452: a session that moves to a branch with no ticket sends ticket: null, so the card drops the old one; one that never had a ticket sends none", () => {
+  let branch = "codex/nj-3235-old-work";
+  const c = { probe: probe({ git: () => ({ branch, repo: "shop", top: "/repo", common: "/repo/.git" }) }) };
+  const first = play([[0, { hook_event_name: "UserPromptSubmit" }]], c);
+  assert.equal(first.events.find((e) => e.type === "run.started").ticket, "NJ-3235");
+  branch = "main";
+  const back = onHook(first.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
+  const started = back.events.find((e) => e.type === "run.started");
+  assert.ok(started && "ticket" in started, "the start is resent with the ticket field");
+  assert.equal(started.ticket, null);
+  // Only run.started carries null; the board refuses it anywhere else.
+  assert.ok(back.events.filter((e) => e.type !== "run.started").every((e) => !("ticket" in e)));
+  // Every field it sends is one the board's contract fixture has, ticket: null included.
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"))["run.started (no ticket)"];
+  for (const key of Object.keys(started)) assert.ok(key in fixture || ["attemptId"].includes(key), "run.started sends " + key);
+  // A new ticket on the next branch replaces null.
+  branch = "codex/cmd-99-ship";
+  assert.equal(onHook(back.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 6 * MIN, c)).events.find((e) => e.type === "run.started").ticket, "CMD-99");
+  // A session that never had a ticket never sends the field.
+  branch = "main";
+  const plain = play([[0, { hook_event_name: "SessionStart", source: "startup" }]], c).events.find((e) => e.type === "run.started");
+  assert.ok(!("ticket" in plain));
 });

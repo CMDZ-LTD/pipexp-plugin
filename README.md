@@ -90,7 +90,7 @@ pipexp connect | status | disconnect | flush | preview [--all] [--raw] | allow r
 pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'
-pipexp ask "question" [--context ...] [--option A --option B] [--timeout-min 60]
+pipexp ask "question" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 ```
 
 ### Contract for skills (a skill with its own stages calls these)
@@ -106,7 +106,7 @@ nobody answered. `--session` defaults to `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSI
 | Run fields change (title, owner, tier, branch) | `pipexp event run.started --json '{"title":"...","owner":"...","tier":"standard"}'` |
 | Snag, gate, review | `pipexp event snag.reported`, `gate.checked` or `review.done` with `--json '{...}'` (the board's fields) |
 | Release | `pipexp event run.finished --json '{"outcome":"ready","prNumber":123,"stopReason":"green"}'` (usage for the last stage goes first) |
-| Ask a person | `pipexp ask "..." [--option A --option B] [--timeout-min 60]` (prints the answer) |
+| Ask a person | `pipexp ask "..." [--option A --option B] [--recipient <github login>] [--timeout-min 60]` (prints the answer). `--recipient`: who it waits on, when that is someone else; the board then keeps it open a day, and after 4 working hours unanswered the standup shows the asker Blocked |
 
 Not installed: `[ -x ~/.config/pipexp/bin/pipexp ] || exit 0`. The path is written the first time a session starts with the plugin.
 
