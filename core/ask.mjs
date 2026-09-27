@@ -2,10 +2,14 @@
 import { randomUUID } from "node:crypto";
 import { credentials } from "./config.mjs";
 import { call } from "./send.mjs";
-import { loadSession, report } from "./run.mjs";
+import { contentFor, loadSession, report } from "./run.mjs";
 import { scrub } from "./scrub.mjs";
 
 const POLL_S = 20;
+// The board's own rule (agent-pipeline lib/people.ts GITHUB_LOGIN): POST /questions refuses any other recipient.
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+// How long the board keeps a question open when none is given: a day when it waits on someone else, else an hour.
+const DAY_MIN = 24 * 60;
 
 /** The board page with this question open on its own: tap an option there to answer. */
 export const questionLink = (boardUrl, questionId) => (boardUrl || "https://pipexp.dev").replace(/\/+$/, "") + "/?question=" + encodeURIComponent(questionId);
@@ -14,10 +18,14 @@ export const questionLink = (boardUrl, questionId) => (boardUrl || "https://pipe
  * wait: "all" waits until answered or timed out (CLI); a number waits at most that many seconds and returns
  * { status: "waiting", questionId, link } so an MCP call can come back and wait again.
  * onAsked(link): called once the board has the question, before waiting, so the link can be shared at once.
+ * recipient: the GitHub login the question waits on, when it is someone else (CMD-230): after 4 working hours unanswered,
+ * the standup shows the asker Blocked. timeoutMin: left out, the board picks (an hour, or a day with a recipient).
  */
-export async function ask({ sessionId, question, context, options, timeoutMin = 60, questionId, wait = "all", onAsked }) {
+export async function ask({ sessionId, question, context, options, timeoutMin, recipient, questionId, wait = "all", onAsked }) {
   const creds = credentials();
   if (!creds) return { status: "failed", reason: "PipeXP is not connected (run pipexp connect)" };
+  const to = recipient == null || recipient === "" ? null : String(recipient).trim().replace(/^@/, "");
+  if (to !== null && !GITHUB_LOGIN.test(to)) return { status: "failed", reason: "recipient is a GitHub login (letters, numbers and dashes), like octocat" };
   let id = questionId;
   const link = () => questionLink(creds.boardUrl, id);
   let repo = loadSession(sessionId)?.repo ?? null;
@@ -37,7 +45,9 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
       question: scrub(question).slice(0, 1000),
       ...(context && { context: scrub(context).slice(0, 2000) }),
       ...(options?.length && { options: options.slice(0, 6).map((o) => scrub(String(o)).slice(0, 120)) }),
-      timeoutMin: Math.min(24 * 60, Math.max(1, Math.round(timeoutMin))),
+      ...(timeoutMin != null && { timeoutMin: Math.min(DAY_MIN, Math.max(1, Math.round(timeoutMin))) }),
+      // Minimal content names nobody (CMD-343), so the question goes without its recipient.
+      ...(to && contentFor(s.cwd) !== "minimal" && { recipient: to }),
     };
     // The run.started above is queued; give the sender a moment so the card exists when the question lands.
     const { run } = await import("../bin/flush.mjs");
@@ -51,7 +61,8 @@ export async function ask({ sessionId, question, context, options, timeoutMin = 
     if (asked.status !== 201 && asked.status !== 200) return { status: "failed", reason: "the board refused the question (HTTP " + asked.status + ")" };
     onAsked?.(link());
   }
-  const until = wait === "all" ? Date.now() + timeoutMin * 60_000 + 30_000 : Date.now() + wait * 1000;
+  // The CLI waits as long as the board keeps the question open; the board says expired when it closes.
+  const until = wait === "all" ? Date.now() + (timeoutMin ?? (to ? DAY_MIN : 60)) * 60_000 + 30_000 : Date.now() + wait * 1000;
   let misses = 0;
   while (Date.now() < until) {
     const left = Math.max(1, Math.min(POLL_S, Math.floor((until - Date.now()) / 1000)));
