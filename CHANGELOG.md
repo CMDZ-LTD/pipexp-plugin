@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.14 (2026-09-27)
 
 - A session start says, once a day, when events are waiting on a board it can't reach or the board refused one, with the fix (CMD-88). Before, you found out only when a card was missing. Connecting and a refused key were already said.
 - pipexp status names the newest release and how old that knowledge is. A release list read before this plugin was tagged is read again within the hour, so status no longer calls an old release the newest (CMD-370).
