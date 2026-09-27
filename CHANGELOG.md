@@ -2,14 +2,16 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
+- Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
+
 ## 0.1.13 (2026-09-27)
 
 - A new machine connects to https://api.pipexp.dev, PipeXP's own address, instead of the Convex one (CMD-56). Machines already connected keep the address they have; both work.
 - CI first runs `scripts/secret-scan.mjs`, the board's secret scan: it fails on a private key, GitHub token, PipeXP reporting key, Stripe or Resend live key, or a long random value named like a key, and prints file, line and rule, never the value. `git config core.hooksPath scripts/hooks` runs it before each commit (CMD-471).
 - pipexp ask prints the question's own link (`Answer it here: <board>/?question=<id>`) as soon as the board has it, and pipexp_ask_human returns it while waiting, so a person nearby can answer in one tap (CMD-77).
-
-- A session is told its repo's own stages when it starts (CMD-421), so the agent reports them with pipexp_report_stage on any harness that takes session context: Codex, Claude Code, Cursor and Gemini CLI (not OpenCode yet). Only when the project has a lane besides agent. Read from the cached board answer, never the network; the flush refreshes it when a session starts and it is over an hour old, and a session that started first is told at its first prompt. Stage names and descriptions go in as single plain lines.
-- Cursor: a note from the board on a prompt now lets the prompt go on (continue: true).
 
 ## 0.1.12 (2026-09-26)
 
