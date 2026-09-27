@@ -3,8 +3,11 @@
 # live in a temp folder for the run, so your own setup is never touched; only the Codex sign-in (auth.json) is linked.
 # Record it:  script -r clean-install.rec scripts/clean-install.sh     (macOS; replay with script -p clean-install.rec)
 # Step 3 opens pipexp.dev/connect: a project member checks the code and clicks Connect.
+# Afterwards, revoke the "Clean install proof" machine's key in Settings > Machines.
 set -euo pipefail
 T=$(mktemp -d)
+# The temp folder holds the proof machine's key and a link to your Codex sign-in: it goes when the script ends, however it ends.
+trap 'rm -rf "$T"' EXIT
 start=$(date +%s)
 say() { printf '\n[%3ss] %s\n' "$(( $(date +%s) - start ))" "$*"; }
 export CODEX_HOME="$T/codex" PIPEXP_HOME="$T/pipexp" PIPEXP_MACHINE_NAME="${PIPEXP_MACHINE_NAME:-Clean install proof}"
