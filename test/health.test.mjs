@@ -71,8 +71,10 @@ test("the audit goes out on connect and then once a day with the next flush, and
   config(true);
   const board = await fakeBoard();
   saveCredentials({ url: board.url, key: "k".repeat(30) });
-  assert.equal(queueAudit(true, T), true, "connect always sends one");
-  assert.equal(queueAudit(false, T + 3_600_000), false, "not again the same day");
+  // The flush below asks queueAudit() on the real clock, so this test does too: a fixed day turns stale the day after.
+  const now = Date.now();
+  assert.equal(queueAudit(true, now), true, "connect always sends one");
+  assert.equal(queueAudit(false, now + 3_600_000), false, "not again the same day");
   await flushNow();
   await flushNow();
   await board.close();

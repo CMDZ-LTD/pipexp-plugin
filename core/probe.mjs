@@ -176,3 +176,6 @@ export function skillInfo(cwd, skill) {
   }
   return undefined;
 }
+
+/** The PR the flush found for this session's branch (core/pr.mjs), or null. A file read, never the network. */
+export { cachedPr as pr } from "./pr.mjs";
