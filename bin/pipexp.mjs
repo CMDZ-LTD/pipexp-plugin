@@ -4,7 +4,7 @@
 //   pipexp status                        connection, queue and this session's run
 //   pipexp stages [--raw]                this repo's lanes and stage ids on the board (--raw: JSON)
 //   pipexp disconnect                    forget this machine's key
-//   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
+//   pipexp stage <lane:stage> [--ticket ABC-12] [--note "what you work on"] [--counters '{"reviewRound":2}'] [--replay]
 //   pipexp activity <working|idle|waiting|blocked|paused> [--note "why"] [--ticket ABC-12]   this session's status
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
@@ -177,7 +177,8 @@ async function main() {
     if (values.claim && !["new", "resume", "takeover"].includes(values.claim)) fail("claim is new, resume or takeover");
     // The same path as the MCP tool (core/run.mjs explicitReport), from this folder: work in another project's repo
     // moves the session only once the board confirmed it. A refusal is said on stderr; a script still exits 0.
-    const r = await explicitReport(session(), { type: "stage", stage: arg, ticket: values.ticket, claim: values.claim, fields }, process.cwd(), runtime);
+    if (values.note !== undefined && values.note.length > 300) fail("note is at most 300 characters");
+    const r = await explicitReport(session(), { type: "stage", stage: arg, ticket: values.ticket, claim: values.claim, note: values.note, fields }, process.cwd(), runtime);
     if (r.error) process.stderr.write("pipexp: " + r.error + "\n");
     return;
   }

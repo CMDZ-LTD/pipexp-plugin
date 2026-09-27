@@ -92,3 +92,39 @@ test("upgraded from 0.1.18: a fresh cache with no capabilities is read again at 
   assert.equal(sent.sessionId, sid);
 });
 
+test("agents are asked, at session start, to say in one line of their own what they work on; the line reaches a board that takes it, and no other", async () => {
+  const dir = repoDir();
+  const cacheOf = (body) => writeFileSync(join(home, "state", "stages", "acme_upgraded.json"), JSON.stringify({ lanes: [{ skill: "agent", label: "Agent sessions", stages: [{ id: "agent:S2", label: "Build" }] }], contentLevel: "standard", at: new Date().toISOString(), ...body }));
+  mkdirSync(join(home, "state", "stages"), { recursive: true });
+  cacheOf({ capabilities: ["agent-activity-v1"] });
+  const told = startContext(dir).text;
+  assert.match(told, /one short line you write yourself/);
+  assert.match(told, /pipexp_report_status/);
+  assert.match(told, /Never copy prompts, code, command output or your reasoning/);
+  // A stage report can carry the line too; standard content keeps it on the event.
+  let s = onHook(null, { ...base, session_id: "said", hook_event_name: "UserPromptSubmit", turn_id: "t1" }, ctx(T0)).state;
+  let r = onReport(s, { type: "stage", stage: "agent:S2", ticket: "ABC-7", note: "Adding the export button to Insights" }, ctx(T0 + MIN));
+  assert.equal(r.events.find((e) => e.type === "step.entered").activity.note, "Adding the export button to Insights");
+  // Minimal content: dropped.
+  s = onHook(null, { ...base, session_id: "said-min", hook_event_name: "UserPromptSubmit", turn_id: "t1" }, ctx(T0, { content: "minimal" })).state;
+  r = onReport(s, { type: "stage", stage: "agent:S2", note: "Private summary" }, ctx(T0 + MIN, { content: "minimal" }));
+  assert.ok(r.events.every((e) => e.activity?.note === undefined));
+  // A board without activity: no instruction, the stage still goes, the line never does, and a status is refused cleanly.
+  cacheOf({ capabilities: [] });
+  assert.doesNotMatch(startContext(dir).text, /write yourself/);
+  const { explicitReport } = await import("../core/run.mjs");
+  hook({ session_id: "old-board-note", cwd: dir, hook_event_name: "UserPromptSubmit", turn_id: "t1" });
+  const i = queued().length;
+  const stage = await explicitReport("old-board-note", { type: "stage", stage: "agent:S2", note: "Summary for an old board" }, dir);
+  assert.equal(stage.error, undefined);
+  const sent = queued().slice(i);
+  assert.ok(sent.some((e) => e.type === "step.entered"), "the stage still goes");
+  assert.ok(sent.every((e) => !e.activity && !JSON.stringify(e).includes("Summary for an old board")), "the line does not");
+  process.env.PIPEXP_URL = "http://127.0.0.1:9";
+  process.env.PIPEXP_KEY = "k".repeat(30);
+  const status = await explicitReport("old-board-note", { type: "activity", state: "working", note: "Summary for an old board" }, dir);
+  delete process.env.PIPEXP_URL;
+  delete process.env.PIPEXP_KEY;
+  assert.match(status.error ?? "", /does not support activity/);
+  assert.equal(queued().length, i + sent.length, "nothing more queued");
+});

@@ -495,7 +495,8 @@ export function onReport(state, report, ctx) {
     }
     // Working is observed on the lane now in use only: the lane left above got its usage with the observation it had,
     // so after ship, shepherd, ship the board's row is ship, never a tie with the lane just left (CMD-518).
-    activity(s, "working", at, "agent");
+    // The agent's own one-line summary of the work may come with the stage (CMD-518); none under minimal content.
+    activity(s, "working", at, "agent", ctx.content === "minimal" ? undefined : words(report.note));
     s.explicit = true;
     if (moved || metadataChanged || changedTicket || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
     enter(s, report.stage, at, out, fields, true);

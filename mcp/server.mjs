@@ -45,6 +45,7 @@ const TOOLS = [
       properties: {
         stage: { type: "string", description: "lane:S<n>, e.g. agent:S3 or ship:S5" },
         ticket: { type: "string", description: "The tracker id this work is for, e.g. ABC-123. Optional." },
+        note: { type: "string", maxLength: 300, description: "One short line you write yourself on what you are working on. Never copy prompts, code, command output or your reasoning. Optional." },
         ...where,
       },
       required: ["stage"],
@@ -196,7 +197,8 @@ async function callTool(name, args = {}) {
   }
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");
-    const r = await explicitReport(id, { type: "stage", stage: args.stage, ticket: args.ticket }, args.cwd);
+    if (args.note !== undefined && (typeof args.note !== "string" || args.note.length > 300)) return err("note must be at most 300 characters");
+    const r = await explicitReport(id, { type: "stage", stage: args.stage, ticket: args.ticket, note: args.note }, args.cwd);
     if (r.error) return err(r.error);
     const { state, events } = r;
     if (!events.length && state.shipOwned) return ok("This session is already reported by the repo's ship scripts; nothing to add.");
