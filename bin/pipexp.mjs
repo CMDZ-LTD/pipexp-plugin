@@ -192,7 +192,9 @@ async function main() {
     if (!EVENTS.includes(arg)) fail("event type is one of " + EVENTS.join(", "));
     if (values.ticket && !TICKET.test(values.ticket)) fail("ticket looks like ABC-123");
     if (values.lane && !/^[a-z0-9-]{1,40}$/.test(values.lane)) fail("lane looks like ship");
-    report(session(), { type: arg, ticket: values.ticket, lane: values.lane, fields: parse(values.json, "--json") }, runtime);
+    // From this folder, like stage and activity: another project's repo refuses it (it never moves the session).
+    const r = await explicitReport(session(), { type: arg, ticket: values.ticket, lane: values.lane, fields: parse(values.json, "--json") }, process.cwd(), runtime);
+    if (r.error) process.stderr.write("pipexp: " + r.error + "\n");
     return;
   }
   if (cmd === "ask") {

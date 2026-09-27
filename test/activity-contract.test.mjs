@@ -78,6 +78,6 @@ test("a report follows an explicit same-repo cwd; an unrelated repo cannot inher
   hook({ session_id: "cwd-change", cwd: first, hook_event_name: "PostToolUse", tool_name: "read" });
   assert.equal(loadSession("cwd-change").cwd, next, "the harness start folder does not undo the explicit work folder");
   execFileSync("git", ["-C", first, "remote", "set-url", "origin", "https://github.com/acme/other"]);
-  assert.throws(() => report("cwd-change", { type: "stage", stage: "agent:S2" }, "codex", first), /another repository/);
+  assert.throws(() => report("cwd-change", { type: "stage", stage: "agent:S2" }, "codex", first), /another project. Nothing was sent/);
   assert.equal(loadSession("cwd-change").cwd, next);
 });

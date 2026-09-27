@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -217,3 +217,63 @@ test("the CLI and the MCP tool give the same result for the same move: refused a
   assert.ok(viaMcp.includes("run.finished acme/a6 old") && viaMcp.includes("run.started acme/b6 new"), viaMcp.join("; "));
 });
 
+function event(sid, cwd, type, json) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [new URL("../bin/pipexp.mjs", import.meta.url).pathname, "event", type, "--session", sid, "--json", JSON.stringify(json)], {
+      cwd, env: { PATH: process.env.PATH, PIPEXP_HOME: home, PIPEXP_NO_FLUSH: "1", PIPEXP_TEST: "1", PIPEXP_URL: board, PIPEXP_KEY: process.env.PIPEXP_KEY, PIPEXP_RUNTIME: "codex" },
+    });
+    let err = "";
+    child.stderr.on("data", (d) => (err += d));
+    child.on("exit", (code) => resolve({ code, err: err.trim() }));
+  });
+}
+function tool(name, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [new URL("../mcp/server.mjs", import.meta.url).pathname], {
+      env: { PATH: process.env.PATH, PIPEXP_HOME: home, PIPEXP_NO_FLUSH: "1", PIPEXP_TEST: "1", PIPEXP_URL: board, PIPEXP_KEY: process.env.PIPEXP_KEY },
+    });
+    let output = "";
+    child.on("error", reject);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const line = output.split("\n").find((s) => s.includes('"id":1'));
+      if (line) { child.kill(); resolve(JSON.parse(line).result); }
+    });
+    child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) + "\n");
+  });
+}
+
+test("Boss: a raw snag, gate or finish from another repo's folder never moves the session and is refused, with no event", async () => {
+  const a = repo("a7");
+  const b = repo("b7");
+  boards["acme/a7"] = { status: 200 };
+  boards["acme/b7"] = { status: 200 };
+  const sid = "raw-events";
+  const before = await start(sid, a);
+  const i = queued().length;
+  const file = saved(sid);
+  const says = /Nothing was sent.*pipexp stage.*pipexp activity/;
+  for (const [type, json] of [["snag.reported", { kind: "snag", theme: "ci", what: "Runner timed out", costMin: 5 }], ["gate.checked", { gate: "ci", result: "pass" }], ["run.finished", { outcome: "ready", prNumber: 7 }]]) {
+    const r = await event(sid, b, type, json);
+    assert.equal(r.code, 0, type + ": a script is never failed");
+    assert.match(r.err, says, type);
+  }
+  for (const [name, args] of [["pipexp_report_snag", { what: "Flaky test" }], ["pipexp_finish", { outcome: "ready" }]]) {
+    const r = await tool(name, { session_id: sid, cwd: b, ...args });
+    assert.equal(r.isError, true, name);
+    assert.match(r.content[0].text, says, name);
+  }
+  assert.deepEqual(since(i), [], "nothing queued, in either project");
+  assert.equal(saved(sid), file);
+  assert.equal(loadSession(sid).runId, before.runId);
+  // The same events from the session's own repo, or from a folder that is no repository, still go to its run.
+  const plain = mkdtempSync(join(tmpdir(), "pipexp-plain-"));
+  for (const where of [a, plain]) {
+    const r = await event(sid, where, "snag.reported", { kind: "snag", theme: "ci", what: "Runner timed out", costMin: 5 });
+    assert.equal(r.err, "");
+  }
+  const sent = since(i);
+  assert.equal(sent.filter((e) => e.type === "snag.reported").length, 2);
+  assert.ok(sent.every((e) => e.runId === before.runId && e.repo === "acme/a7"));
+  assert.ok(!realpathSync(loadSession(sid).cwd).startsWith(realpathSync(plain)), "a plain folder does not pin the session");
+});

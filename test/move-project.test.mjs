@@ -31,7 +31,7 @@ test("a session that moves repo ends its old run there and reports the new repo 
   const old = loadSession(sid);
   // Without the board's go-ahead nothing moves.
   const before = queued().length;
-  assert.throws(() => report(sid, { type: "stage", stage: "agent:S2", ticket: "ABC-2" }, "codex", next), /another repository/);
+  assert.throws(() => report(sid, { type: "stage", stage: "agent:S2", ticket: "ABC-2" }, "codex", next), /another project. Nothing was sent/);
   assert.equal(queued().length, before);
   report(sid, { type: "stage", stage: "agent:S2", ticket: "ABC-2" }, "codex", next, { move: true });
   const events = since(before);

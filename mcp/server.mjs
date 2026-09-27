@@ -205,7 +205,9 @@ async function callTool(name, args = {}) {
   if (name === "pipexp_report_snag") {
     // Codex does not hold agents to the enum or the required fields: snagFields makes whatever came a snag the board takes.
     const fields = snagFields({ kind: args.kind, theme: args.theme, what: args.what, note: args.note, description: args.description, costMin: args.cost_min });
-    report(id, { type: "snag.reported", fields }, undefined, args.cwd);
+    // The same path as every explicit report: from another project's folder it is refused, never filed or moved.
+    const r = await explicitReport(id, { type: "snag.reported", fields }, args.cwd);
+    if (r.error) return err(r.error);
     const asked = typeof args.kind === "string" ? args.kind.trim() : "";
     return ok("Snag recorded" + (asked && asked.toLowerCase() !== fields.kind ? " as kind snag (" + JSON.stringify(asked.slice(0, 40)) + " is not one of " + SNAG_KINDS.join(", ") + ")" : "") + ".");
   }
@@ -216,7 +218,9 @@ async function callTool(name, args = {}) {
     const pr = args.pr_number ?? args.prNumber ?? args.pr;
     if (pr !== undefined && pr !== null) fields.prNumber = pr;
     if (args.question) fields.question = args.question;
-    const { events } = report(id, { type: "run.finished", fields }, undefined, args.cwd);
+    const r = await explicitReport(id, { type: "run.finished", fields }, args.cwd);
+    if (r.error) return err(r.error);
+    const { events } = r;
     // What was recorded, read back from the event itself, so a dropped PR number shows at once.
     const sent = events.find((e) => e.type === "run.finished");
     if (!sent) return err("Nothing recorded: this session is reported by the repo's ship scripts.");

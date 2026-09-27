@@ -196,12 +196,14 @@ function moveScope(old, cwd) {
 export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = false } = {}) {
   const { state, events } = withSessionLock(sessionId, () => {
     let existing = loadSession(sessionId);
+    // A folder that is no repository says nothing about the project: the session keeps its own (a script run from /tmp).
+    if (existing && cwd && !repoOf(cwd) && repoOf(existing.cwd)) cwd = undefined;
     const folder = cwd ?? existing?.cwd ?? process.cwd();
     // Checked before anything moves or is sent: a report that cannot go never leaves half a move.
     const problem = reportProblem(rep);
     if (problem) throw new Error(problem);
     if (movesRepo(existing, cwd)) {
-      if (!move || !repoOf(cwd)) throw new Error("This session belongs to another repository. Start a session in the new project instead.");
+      if (!move || !SCOPE_TYPES.has(rep.type)) throw new Error(otherScope(existing, cwd));
       existing = moveScope(existing, cwd);
     }
     const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), folder);
@@ -216,8 +218,13 @@ export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = fals
   return { state, events };
 }
 
-/** Whether a report from cwd names another repository than the session's. */
-export const movesRepo = (session, cwd) => !!session && !!cwd && repoOf(session.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase();
+/** Whether a report from cwd names another repository than the session's. A folder that is no repository never does. */
+export const movesRepo = (session, cwd) => !!session && !!cwd && !!repoOf(cwd) && repoOf(session.cwd)?.toLowerCase() !== repoOf(cwd).toLowerCase();
+// Only these pick a session's project; a raw event (snag, gate, finish...) never moves it (CMD-518, the Boss).
+const SCOPE_TYPES = new Set(["stage", "activity"]);
+const otherScope = (session, cwd) =>
+  "This session reports to " + (repoOf(session.cwd) ?? "a folder with no repository") + ", and " + repoOf(cwd) + " is another project. Nothing was sent. " +
+  "Pick the scope first with pipexp stage or pipexp activity (pipexp_report_stage or pipexp_report_status), then send it again.";
 
 /**
  * The one path for an explicit stage or status report, from the MCP tools and the CLI alike (CMD-518). Work in another
@@ -230,6 +237,7 @@ export async function explicitReport(sessionId, rep, cwd, runtime = runtimeOf())
   if (problem) return { error: problem };
   const existing = loadSession(sessionId);
   const move = movesRepo(existing, cwd);
+  if (move && !SCOPE_TYPES.has(rep.type)) return { error: otherScope(existing, cwd) };
   if (move) {
     const cfg = await stagesFor(cwd);
     if (cfg.from !== "board" || !cfg.lanes) return { error: "This session reports to another project, and the board did not confirm " + (cfg.repo ?? "this folder") + " for this machine" + (cfg.reason ? " (" + cfg.reason + ")" : "") + ". Nothing was moved." };
