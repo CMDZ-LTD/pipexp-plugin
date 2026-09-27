@@ -174,11 +174,25 @@ export function hook(input, runtime = runtimeOf()) {
  * cached answer is old or missing, and any hook where it was written by 0.1.18 (no capabilities), so a long-lived thread
  * learns at once that the board takes activity (CMD-518). Read once: the answer then has capabilities.
  */
-export function stagesDue(input) {
+export function stagesDue(input, now = Date.now()) {
   if (!input?.cwd) return null;
-  const { stale, legacy } = startContext(input.cwd);
-  return legacy || (input.hook_event_name === "SessionStart" && stale) ? input.cwd : null;
+  const { stale, legacy } = startContext(input.cwd, now);
+  if (legacy) {
+    // R3 on #38: a board that refuses, errors or is out of reach leaves the old cache, so every tool call would read it
+    // again. The first hook after the upgrade reads at once; after any attempt, the next waits TRY_MS. Only when and how
+    // often is kept, never an answer or a key.
+    const key = repoOf(input.cwd) ?? "_default";
+    const tried = readJson(triedFile()) ?? {};
+    if (now - (tried[key]?.at ?? 0) < TRY_MS) return null;
+    try {
+      writeJson(triedFile(), { ...tried, [key]: { at: now, n: (tried[key]?.n ?? 0) + 1 } });
+    } catch {}
+    return input.cwd;
+  }
+  return input.hook_event_name === "SessionStart" && stale ? input.cwd : null;
 }
+const TRY_MS = 5 * 60_000;
+const triedFile = () => join(stateDir(), "stages", "_tried.json");
 
 /**
  * A session that now works in another repository (CMD-518): the run it had ends where it is, in its own project, and

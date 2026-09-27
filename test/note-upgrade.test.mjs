@@ -2,7 +2,7 @@
 // 0.1.18 starts sending status at its first work after the board is read again, without a manual pipexp stages.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -67,7 +67,8 @@ test("upgraded from 0.1.18: a fresh cache with no capabilities is read again at 
   const sid = "upgraded";
   // A long-lived thread: no SessionStart after the upgrade, only its next tool calls.
   hook({ session_id: sid, cwd: dir, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "ls" }, turn_id: "t1" });
-  assert.equal(stagesDue({ session_id: sid, cwd: dir, hook_event_name: "PostToolUse" }), dir, "any hook asks the flush to read the board");
+  const asked = JSON.parse(readFileSync(join(home, "state", "stages", "_tried.json"), "utf8"))["acme/upgraded"];
+  assert.equal(asked?.n, 1, "the first hook after the upgrade asks the flush to read the board");
   assert.equal(loadSession(sid).activitySent, undefined, "an observation the old board could not take is not marked sent");
   // The flush reads the board (what PIPEXP_STAGES_CWD makes it do); the board now takes activity.
   const server = createServer((req, res) => {
@@ -127,4 +128,50 @@ test("agents are asked, at session start, to say in one line of their own what t
   delete process.env.PIPEXP_KEY;
   assert.match(status.error ?? "", /does not support activity/);
   assert.equal(queued().length, i + sent.length, "nothing more queued");
+});
+test("R3: after an upgrade, a board that refuses, errors or cannot be reached is read at most once every 5 minutes, however many tool calls", async () => {
+  const tried = (dir) => {
+    try { return JSON.parse(readFileSync(join(home, "state", "stages", "_tried.json"), "utf8"))[dir] ?? { n: 0 }; } catch { return { n: 0 }; }
+  };
+  for (const answer of [403, 404, 500, "offline", 200]) {
+    const dir = repoDir();
+    const name = "acme/upgraded";
+    // Each case its own home state for this repo: a fresh 0.1.18 cache, no attempt yet.
+    mkdirSync(join(home, "state", "stages"), { recursive: true });
+    writeFileSync(join(home, "state", "stages", "acme_upgraded.json"), JSON.stringify({ lanes: [{ skill: "agent", label: "Agent sessions", stages: [{ id: "agent:S2", label: "Build" }] }], contentLevel: "standard", at: new Date().toISOString() }));
+    try { writeFileSync(join(home, "state", "stages", "_tried.json"), "{}"); } catch {}
+    let reads = 0;
+    const server = createServer((req, res) => {
+      reads++;
+      const ok = answer === 200;
+      res.writeHead(ok ? 200 : answer, { "content-type": "application/json" });
+      res.end(JSON.stringify(ok ? { lanes: [{ skill: "agent", label: "Agent sessions", stages: [{ id: "agent:S2", label: "Build" }] }], contentLevel: "standard", capabilities: ["agent-activity-v1"] } : { error: "Project not found" }));
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    process.env.PIPEXP_URL = answer === "offline" ? "http://127.0.0.1:9" : "http://127.0.0.1:" + server.address().port;
+    process.env.PIPEXP_KEY = "k".repeat(30);
+    const real = Date.now;
+    let now = real();
+    Date.now = () => now;
+    const sid = "flood-" + answer;
+    try {
+      // 30 tool calls over 4.5 minutes, then one after the interval. The flush reads the board whenever the hook asked it to.
+      for (let k = 0; k <= 30; k++) {
+        now += k === 30 ? 60_000 : 9_000;
+        const before = tried(name).n;
+        hook({ session_id: sid, cwd: dir, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "ls" }, turn_id: "t1" });
+        if (tried(name).n > before) await stagesFor(dir);
+      }
+    } finally {
+      Date.now = real;
+      await new Promise((r) => server.close(r));
+      delete process.env.PIPEXP_URL;
+      delete process.env.PIPEXP_KEY;
+    }
+    const expected = answer === 200 ? 1 : 2;
+    assert.equal(tried(name).n, expected, answer + ": reads asked for");
+    if (answer !== "offline") assert.equal(reads, expected, answer + ": reads the board saw");
+    const kept = JSON.parse(readFileSync(join(home, "state", "stages", "_tried.json"), "utf8"));
+    assert.ok(!JSON.stringify(kept).includes("Project not found") && !JSON.stringify(kept).includes("k".repeat(30)), "no error body or key kept");
+  }
 });
