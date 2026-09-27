@@ -265,8 +265,9 @@ function start(s, ctx, claim, out) {
   refresh(s, ctx);
   out.push(event(s, "run.started", startFields(s, ctx, claim), ctx.now));
   s.lastSentAt = ctx.now;
-  // A resumed run was finished on the board: re-entering its stage makes it active again.
-  if (s.finished && s.stage) enter(s, s.stage, ctx.now, out, {}, true);
+  // A resumed run was finished on the board: re-entering its stage makes it active again. Only a stage of this lane:
+  // the board refuses any other (CMD-370, 27 Sep 20:45:41 UTC: ship:S5 re-entered on the manager lane).
+  if (s.finished && s.stage?.startsWith(s.skill + ":")) enter(s, s.stage, ctx.now, out, {}, true);
   s.started = true;
   s.finished = false;
 }
@@ -340,7 +341,8 @@ export function onHook(state, input, ctx) {
     // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
     // Back from waiting, a session that reports its own stages picks up the one it was in (CMD-374, CMD-518).
-    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage ?? RESUME[s.skill], at, out);
+    // managerStage is shared by the agent and manager lanes: only a stage of this lane is picked up.
+    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage?.startsWith(s.skill + ":") ? s.managerStage : RESUME[s.skill], at, out);
     if (!out.length) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // A new turn is working, whatever was held (a board stop, or a status the agent reported); in the same turn a hold
@@ -487,7 +489,7 @@ export function onReport(state, report, ctx) {
           s.startedAt = new Date(at).toISOString();
           s.stage = null;
           s.fields = parent !== s.runId ? { parentRunId: parent } : {};
-        }
+        } else if (!s.stage?.startsWith(skill + ":")) s.stage = null; // the lane left's stage is not this run's
       }
       s.runs[skill] = s.runId;
       s.skill = skill;
