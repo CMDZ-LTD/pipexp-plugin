@@ -38,8 +38,10 @@ const BEAT_MS = 30 * 60_000;
 // every 4, only from a real hook. Every event counts toward the board's 2,000 per run, and after a 429 only run.finished
 // goes, so a run sends at most ACTIVITY_BEATS of them; past that, activity goes only when it changes.
 const ACTIVITY_BEAT_MS = 4 * 60_000;
-export const ACTIVITY_BEATS = 500;
+export const ACTIVITY_BEATS = 300;
 export const ACTIVITY_STATES = ["working", "idle", "waiting", "blocked", "paused"];
+// What the board takes as a sessionId (PipeXP #520 lib/event-schema.ts); any other id is left off, never the event.
+const SESSION_ID = /^[a-zA-Z0-9._-]{1,100}$/;
 const held = (s) => ["waiting", "blocked", "paused"].includes(s.activity?.state) || (s.activity?.source === "agent" && s.activity.state === "idle");
 const activity = (s, state, at, source = "hook", note) => {
   s.activity = { state, observedAt: new Date(at).toISOString(), source, ...(note && { note }) };
@@ -137,17 +139,36 @@ export function newState(input, ctx) {
 
 /** A fresh id per event. The outbox keeps it, so every resend of a queued event carries the same id. */
 function event(s, type, fields, at) {
+  // The board refuses an observation later than its event: an activity from after this moment is left off.
+  const act = s.activity && Date.parse(s.activity.observedAt) <= at ? s.activity : null;
   const out = { eventId: randomUUID(), runId: s.runId, occurredAt: new Date(at).toISOString(), skill: s.skill, runtime: s.runtime, type,
-    sessionId: s.sessionId, ...(s.activity && { activity: s.activity }) };
+    ...(SESSION_ID.test(s.sessionId ?? "") && { sessionId: s.sessionId }), ...(act && { activity: act }) };
   // What the board last heard of this session's activity, and when.
-  if (s.activity) {
-    s.activitySent = s.activity.state;
+  if (act) {
+    s.activitySent = act.state;
     s.activitySentAt = at;
   }
   if (s.ticket) out.ticket = s.ticket;
   if (s.attemptId) out.attemptId = s.attemptId;
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) out[k] = v;
   return out;
+}
+
+/**
+ * Activity the board has not heard yet (CMD-518): a change at once, else, while working, a heartbeat at most every
+ * ACTIVITY_BEAT_MS and ACTIVITY_BEATS per run, so the run stays under the board's event cap; a beat carries only an observation
+ * this hook just made. Nothing when the board cannot
+ * take activity, or when an event in out already carries it.
+ */
+function sendActivity(s, ctx, out, at, beat = true) {
+  if (!s.activity || ctx.activity === false || out.some((e) => e.activity)) return;
+  const beats = s.beats?.[s.runId] ?? 0;
+  if (s.activity.state !== s.activitySent) out.push(event(s, "activity.reported", {}, at));
+  else if (beat && s.activity.state === "working" && Date.parse(s.activity.observedAt) === at && at - (s.activitySentAt ?? 0) >= ACTIVITY_BEAT_MS && beats < ACTIVITY_BEATS) {
+    s.beats = { ...s.beats, [s.runId]: beats + 1 };
+    // _beat: while the board is out of reach, the outbox keeps only the newest (core/queue.mjs).
+    out.push({ ...event(s, "activity.reported", {}, at), _beat: true });
+  }
 }
 
 /** A usage.reported the sender fills in from the transcript, so a hook never reads big files. */
@@ -158,6 +179,10 @@ const usageMarker = (s, stage, at) => ({
 
 function startFields(s, ctx, claim) {
   const { title: _title, ...fields } = ctx.content === "minimal" ? s.fields : {};
+  // The old checkout's PR is unlinked once, with the first start after the change (R5 on #520). A later start on the same
+  // branch leaves prNumber out, so a PR the board linked by itself stays linked even when this machine's lookup finds none.
+  const dropPr = s.prDropped;
+  s.prDropped = false;
   return {
     title: s.title,
     owner: s.owner ?? null,
@@ -173,7 +198,7 @@ function startFields(s, ctx, claim) {
     // The card had a ticket and this branch has none: null drops it on the board (CMD-452, board #344). Left out, the
     // board would keep the old one; a session that never had a ticket sends none, so an older board is never refused.
     ...(!s.ticket && s.ticketDropped && { ticket: null }),
-    ...(s.prDropped && { prNumber: null }),
+    ...(dropPr && { prNumber: null }),
   };
 }
 
@@ -252,6 +277,11 @@ export function onHook(state, input, ctx) {
   if (!input?.session_id) return { state, events: [] };
   if (name === "PrFound" && !state) return { state, events: [] };
   const s = state ? structuredClone(state) : newState(input, ctx);
+  // Codex names each turn: turn_id is on UserPromptSubmit, PostToolUse and Stop (its hook input schemas require it). A
+  // hook in a turn other than the last one seen starts a new turn even with no prompt: a delegated turn (a message from
+  // another thread) fires no UserPromptSubmit. Runtimes that name no turn wait for a prompt, as before (CMD-518).
+  const newTurn = typeof input.turn_id === "string" && !!s.turnId && input.turn_id !== s.turnId;
+  if (typeof input.turn_id === "string" && input.turn_id) s.turnId = input.turn_id;
   // PrFound comes from the flush, not the agent: it says nothing about whether the session is still going.
   if (name !== "PrFound") s.lastSeenAt = at;
   if (input.transcript_path) s.transcriptPath = input.transcript_path;
@@ -300,10 +330,16 @@ export function onHook(state, input, ctx) {
     else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage ?? RESUME[s.skill], at, out);
     if (!out.length) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
+    // A new turn is working, whatever was held (a board stop, or a status the agent reported); in the same turn a hold
+    // stays. After a finish, only a turn that started since then is new work.
+    const since = !s.finished || (!!s.finishedTurn && s.turnId !== s.finishedTurn);
+    if (newTurn || (since && !held(s))) activity(s, "working", at);
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
-    // Done (CMD-370: a finish was undone 144 ms later). The next prompt, or an explicit report, brings it back.
-    if (s.finished) return { state: s, events: [] };
-    if (!held(s)) activity(s, "working", at);
+    // Done (CMD-370: a finish was undone 144 ms later), and a later turn's never reopen it; only its activity goes.
+    if (s.finished) {
+      sendActivity(s, ctx, out, at);
+      return { state: s, events: out };
+    }
     revive(s, ctx, out);
     const cmd = commandOf(input.tool_input);
     // Claude Code sends a failed tool call as its own event (PostToolUseFailure, with "error"), Codex inside the response.
@@ -327,23 +363,16 @@ export function onHook(state, input, ctx) {
       if (s.fails === FAILS_FOR_SNAG)
         out.push(event(s, "snag.reported", { stage: s.stage ?? undefined, kind: "snag", theme: "checks failing", what: "The same checks failed " + FAILS_FOR_SNAG + " times in a row: " + cmd.slice(0, 200), costMin: null }, at));
     }
-    // Activity the board has not heard yet: a change at once (a delegated turn has no UserPromptSubmit, so its first tool
-    // call is where it starts working), else a heartbeat within the budget. Nothing when the board cannot take it.
-    if (s.activity && ctx.activity !== false && !out.some((e) => e.activity)) {
-      const changed = s.activity.state !== s.activitySent;
-      const beats = s.beats?.[s.runId] ?? 0;
-      if (changed) out.push(event(s, "activity.reported", {}, at));
-      else if (s.activity.state === "working" && at - (s.activitySentAt ?? 0) >= ACTIVITY_BEAT_MS && beats < ACTIVITY_BEATS) {
-        s.beats = { ...s.beats, [s.runId]: beats + 1 };
-        // _beat: while the board is out of reach, the outbox keeps only the newest (core/queue.mjs).
-        out.push({ ...event(s, "activity.reported", {}, at), _beat: true });
-      }
-    }
+    sendActivity(s, ctx, out, at);
   } else if (name === "Stop") {
-    // The turn that finished the card ends: nothing to add.
     s.inTurn = false;
-    if (s.finished) return { state: s, events: [] };
-    if (!held(s)) activity(s, "idle", at);
+    // The turn ends idle, unless a hold was set in this very turn (a board stop, blocked, paused, waiting).
+    if (newTurn || !held(s)) activity(s, "idle", at);
+    // A finished workflow stays finished with its outcome: only the session's activity goes (CMD-518).
+    if (s.finished) {
+      sendActivity(s, ctx, out, at, false);
+      return { state: s, events: out };
+    }
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
@@ -366,6 +395,7 @@ export function onHook(state, input, ctx) {
     s.outcome = handedBack ? "ready" : "abandoned";
     out.push(event(s, "run.finished", { outcome: s.outcome, prNumber: s.prNumber }, at));
     s.finished = true;
+    s.finishedTurn = s.turnId ?? null;
   } else if (name !== "PrFound") {
     return { state: s, events: [] };
   }
@@ -467,6 +497,7 @@ export function onReport(state, report, ctx) {
         if (fields.prNumber === undefined) fields.prNumber = s.prNumber;
         out.push(usageMarker(s, s.stage, at));
         s.finished = true;
+        s.finishedTurn = s.turnId ?? null;
       }
       out.push(event(s, report.type, { ...(report.type === "snag.reported" && { stage: s.stage ?? undefined }), ...fields }, at));
     }

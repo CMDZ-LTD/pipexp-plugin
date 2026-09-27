@@ -42,7 +42,7 @@ test("activity heartbeats stop at a per-run budget, so a run that works for days
   const steps = Array.from({ length: 6000 }, (_, i) => [(i + 1) * 30_000, tool]); // 50 hours
   const { events } = play(reported(), steps);
   const beats = events.filter((e) => e.type === "activity.reported").length;
-  assert.ok(beats <= 500, beats + " activity beats");
+  assert.ok(beats <= 300, beats + " activity beats");
   assert.ok(events.length < 1000, events.length + " events in 50 hours");
 });
 

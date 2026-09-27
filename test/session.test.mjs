@@ -322,7 +322,10 @@ test("CMD-370: after a finish, that turn's tool calls and its end leave the card
   const tool = onHook(done.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }, ctx(T0 + 2 * MIN + 144));
   assert.deepEqual(tool.events, [], "144 ms later: nothing");
   const stop = onHook(tool.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN));
-  assert.deepEqual(stop.events, []);
+  // CMD-518: the finished workflow stays Done; only the session's activity goes idle at the turn's end.
+  assert.deepEqual(brief(stop.events), ["activity.reported"]);
+  assert.equal(stop.events[0].activity.state, "idle");
+  assert.equal(stop.state.finished, true);
   const next = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 60 * MIN));
   assert.deepEqual(brief(next.events).slice(0, 1), ["run.started"]);
 });
