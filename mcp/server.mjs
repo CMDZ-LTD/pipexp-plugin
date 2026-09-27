@@ -8,7 +8,7 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
-import { findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { findSession, loadSession, movesRepo, report, runtimeOf } from "../core/run.mjs";
 import { describe, stagesFor, supportsActivity } from "../core/stages.mjs";
 import { ACTIVITY_STATES, SNAG_KINDS, snagFields } from "../core/session.mjs";
 
@@ -183,6 +183,14 @@ async function callTool(name, args = {}) {
   // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
   if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");
+  // Work that moved to another repository (CMD-518): the session reports there only once the board has answered that
+  // this key may (GET /plugin/config for that repo, the same member, project and key-scope checks as every event).
+  let move = false;
+  if ((name === "pipexp_report_stage" || name === "pipexp_report_status") && movesRepo(loadSession(id), args.cwd)) {
+    const cfg = await stagesFor(args.cwd);
+    if (cfg.from !== "board" || !cfg.lanes) return err("This session reports to another project, and the board did not confirm " + (cfg.repo ?? "this folder") + " for this machine" + (cfg.reason ? " (" + cfg.reason + ")" : "") + ". Nothing was moved.");
+    move = true;
+  }
   if (name === "pipexp_report_status") {
     if (!ACTIVITY_STATES.includes(args.state)) return err("state must be working, idle, waiting, blocked or paused");
     if (args.note !== undefined && (typeof args.note !== "string" || args.note.length > 300)) return err("note must be at most 300 characters");
@@ -190,13 +198,13 @@ async function callTool(name, args = {}) {
     const cwd = args.cwd ?? loadSession(id)?.cwd;
     if (!supportsActivity(cwd)) await stagesFor(cwd);
     if (!supportsActivity(cwd)) return err("This board does not support activity reports yet. Update the board first; no status was sent.");
-    const { state, events } = report(id, { type: "activity", state: args.state, note: args.note, ticket: args.ticket }, undefined, args.cwd);
+    const { state, events } = report(id, { type: "activity", state: args.state, note: args.note, ticket: args.ticket }, undefined, args.cwd, { move });
     if (!events.length && state.shipOwned) return err("This session is reported by the repo's ship scripts; no status was sent.");
     return ok("Queued status: " + args.state + (state.ticket ? " for " + state.ticket : ""));
   }
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");
-    const { state, events } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd);
+    const { state, events } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd, { move });
     if (!events.length && state.shipOwned) return ok("This session is already reported by the repo's ship scripts; nothing to add.");
     return ok("On the board: " + state.stage + (state.ticket ? " for " + state.ticket : ""));
   }

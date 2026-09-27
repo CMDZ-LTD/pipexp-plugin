@@ -10,7 +10,7 @@ import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
+import { newState, onHook, onIdle, onReport, PR_CMD, commandOf, uuid5 } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
 import { boardContent, repoOf, routedRepo, startContext, supportsActivity } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
@@ -163,13 +163,40 @@ export function hook(input, runtime = runtimeOf()) {
   return events;
 }
 
-/** An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. */
-export function report(sessionId, rep, runtime = runtimeOf(), cwd) {
+/**
+ * A session that now works in another repository (CMD-518): the run it had ends where it is, in its own project, and
+ * the same session starts a new run for the new repo. The new run's id comes from the session and the repo, so no run
+ * ever moves between projects and the real session id is kept. Only after the board said this key may report there.
+ */
+function moveScope(old, cwd) {
+  const ctx = context(old.runtime, old.transcriptPath, old.runtimeVersion, Date.now(), old.cwd);
+  // Its events keep the old repo (commit names state.repo), so the finish lands on the old project's board.
+  if (old.started && !old.finished) {
+    const done = onReport(old, { type: "run.finished", fields: { outcome: "abandoned", prNumber: old.prNumber ?? null } }, ctx);
+    commit(done.state, done.events);
+  }
+  const repo = repoOf(cwd).toLowerCase();
+  const s = newState({ session_id: old.sessionId, cwd, transcript_path: old.transcriptPath }, context(old.runtime, old.transcriptPath, old.runtimeVersion, ctx.now, cwd));
+  s.runId = uuid5("pipexp/session/" + old.sessionId + "/repo/" + repo);
+  s.runs = { agent: s.runId };
+  // Tokens from here on belong to the new run; the old run's usage went with its finish.
+  s.startedAt = new Date(ctx.now).toISOString();
+  s.reportingCwd = cwd;
+  for (const k of ["runtimeVersion", "owner", "turns", "interrupts", "inTurn", "turnId", "activity"]) if (old[k] !== undefined) s[k] = old[k];
+  return s;
+}
+
+/**
+ * An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. A cwd in another repository
+ * is refused unless move is set: the caller has checked the board takes this key's events for that repo.
+ */
+export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = false } = {}) {
   const { state, events } = withSessionLock(sessionId, () => {
-    const existing = loadSession(sessionId);
+    let existing = loadSession(sessionId);
     const folder = cwd ?? existing?.cwd ?? process.cwd();
-    if (existing && cwd && repoOf(existing.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase()) {
-      throw new Error("This session belongs to another repository. Start a session in the new project instead.");
+    if (movesRepo(existing, cwd)) {
+      if (!move || !repoOf(cwd)) throw new Error("This session belongs to another repository. Start a session in the new project instead.");
+      existing = moveScope(existing, cwd);
     }
     const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), folder);
     // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
@@ -182,6 +209,9 @@ export function report(sessionId, rep, runtime = runtimeOf(), cwd) {
   if (credentials()) kick();
   return { state, events };
 }
+
+/** Whether a report from cwd names another repository than the session's. */
+export const movesRepo = (session, cwd) => !!session && !!cwd && repoOf(session.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase();
 
 const real = (path) => {
   try {
