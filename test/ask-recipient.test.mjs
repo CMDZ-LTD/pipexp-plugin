@@ -14,6 +14,7 @@ const contract = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json
 
 async function board() {
   const asked = [];
+  const polled = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -24,6 +25,7 @@ async function board() {
         res.statusCode = 201;
         return res.end("{}");
       }
+      if (req.method === "GET" && req.url.startsWith("/questions/")) polled.push(req.url);
       if (req.method === "GET" && req.url.startsWith("/questions/")) return res.end(JSON.stringify({ status: "answered", answer: "Keep it", answeredBy: "ben@acme.test" }));
       res.statusCode = 202;
       res.end("{}");
@@ -32,7 +34,7 @@ async function board() {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const home = mkdtempSync(join(tmpdir(), "pipexp-ask-"));
   writeFileSync(join(home, "credentials.json"), JSON.stringify({ url: "http://127.0.0.1:" + server.address().port, key: "pipexp_rk_" + "a".repeat(43) }));
-  return { home, asked, close: () => new Promise((r) => server.close(r)) };
+  return { home, asked, polled, close: () => new Promise((r) => server.close(r)) };
 }
 
 function run(file, args, home, stdin = "") {
@@ -63,9 +65,13 @@ test("pipexp_ask_human and pipexp ask name who the question waits on, and leave 
     // Without a timeout the board keeps a question naming someone else open a day (an hour without one): none is sent.
     assert.equal("timeoutMin" in mcp || "timeoutMin" in cli, false);
     assert.equal(plain.timeoutMin, 30);
+    // CMD-374: each question says where it was asked, so the board never files an off-repo one on this key's own
+    // project; the poll finds it the same way, by origin and run.
+    for (const q of b.asked) assert.ok(["repo", "none"].includes(q.origin), "every question says its origin");
+    assert.ok(b.polled.length && b.polled.every((u) => /[?&]origin=(repo|none)&run=[0-9a-f-]{36}/.test(u)), b.polled.join(" "));
     assert.equal("recipient" in plain, false);
     // Only fields the board's strict schema takes.
-    for (const q of b.asked) for (const key of Object.keys(q)) assert.ok(key in contract || ["repo", "ticket", "context", "timeoutMin"].includes(key), "sends " + key);
+    for (const q of b.asked) for (const key of Object.keys(q)) assert.ok(key in contract || ["repo", "ticket", "context", "timeoutMin", "origin"].includes(key), "sends " + key);
   } finally {
     await b.close();
   }

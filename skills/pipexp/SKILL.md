@@ -36,6 +36,9 @@ Each project sets its lanes and stages in PipeXP (Settings > Pipeline), and a re
 only ids it gives. A stage marked "waits on a person" is where you hand over to a human. An id the board does not
 list still lands, under Unmapped, so a new stage never loses a report; tell the user to add it in Settings > Pipeline.
 
+If you hand out and follow other agents' work (a manager or lead session), report the `manager` lane's stages
+(for example manager:S2), not an agent or ship stage. Your card then waits in Managers at each turn's end.
+
 ## Rules
 
 - Never put secrets, keys, customer data or personal details in any text you send. The plugin scrubs

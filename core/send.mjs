@@ -74,9 +74,14 @@ export async function post(creds, event) {
   if (res.status === 403 && event.repo && /No project for this repo/.test(res.body?.error ?? "")) {
     const { markRefused } = await import("./stages.mjs");
     markRefused(event.repo);
+    // An event that says where it runs (CMD-374) is not sent again without its repo: the board would not file it on
+    // this key's project anyway. It is dropped quietly: a repo with no project here is not a fault to warn about.
+    if (event.origin) return "refused";
     const { repo: _repo, ...rest } = event;
     return post(creds, rest);
   }
+  // A session outside every project's repo (CMD-374): refused by design, so not logged as a fault either.
+  if (res.status === 403 && event.origin && /No project for this repo/.test(res.body?.error ?? "")) return "refused";
   if (res.status >= 400 && res.status < 500) {
     logRefusal(event, res.status, res.body);
     return "refused";
