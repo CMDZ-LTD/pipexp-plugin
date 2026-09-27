@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.18 (2026-09-27)
 
 - A snag always reaches the board (CMD-370). An agent could call pipexp_report_snag with a kind the board does not know ("flaky") or a note in place of what, and the board refused the whole snag. Now a known kind passes as it is, any other goes as snag with the agent's word kept in theme, and what falls back to the note, so nothing is lost. The same holds for pipexp event snag.reported.
 
