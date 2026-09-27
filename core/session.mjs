@@ -5,6 +5,27 @@ import { VERSION } from "./config.mjs";
 
 // The board's "agent" lane (GET /plugin/config). Explicit reports may name any lane's stage instead.
 export const STAGES = { explore: "agent:S1", build: "agent:S2", test: "agent:S3", pr: "agent:S4", waiting: "agent:S5" };
+// The board's snag kinds (agent-pipeline lib/event-schema.ts SNAG_KINDS). The board refuses any other kind.
+export const SNAG_KINDS = ["snag", "wrong-doc", "missing-script", "gate", "evidence", "worked"];
+const words = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/**
+ * A snag the board always takes, whatever an agent passed (CMD-370: kind "flaky" and a "note" instead of theme and what
+ * got a 400, and the snag was lost). A known kind passes; any other goes as "snag", its word kept in theme when theme has
+ * room. what falls back to note or description, then theme. Only the board's own fields go on.
+ */
+export function snagFields(f = {}) {
+  const raw = words(f.kind);
+  const wanted = raw?.toLowerCase().replace(/[_\s]+/g, "-");
+  const kind = SNAG_KINDS.includes(wanted) ? wanted : "snag";
+  const given = words(f.theme);
+  const unknown = raw && kind === "snag" && wanted !== "snag" ? raw : null;
+  let theme = given ?? unknown ?? "snag";
+  if (unknown && given && !given.toLowerCase().includes(unknown.toLowerCase()) && (unknown + ": " + given).length <= 60) theme = unknown + ": " + given;
+  const what = words(f.what) ?? words(f.note) ?? words(f.description) ?? words(f.message) ?? given ?? unknown ?? "A snag";
+  const cost = typeof f.costMin === "number" && Number.isFinite(f.costMin) && f.costMin >= 0 ? Math.min(f.costMin, 10_000) : null;
+  return { ...(Number.isInteger(f.step) && { step: f.step }), ...(words(f.stage) && { stage: f.stage }), kind, theme, what, costMin: cost };
+}
 // A manager's own lane (CMD-374): a session that reports manager:Sx waits there, never in a builder's stage.
 export const MANAGER_WAITING = "manager:S4";
 const BEAT_MS = 30 * 60_000;
@@ -328,7 +349,7 @@ export function onReport(state, report, ctx) {
     s.shipOwned = true;
     return { state: s, events: [] };
   }
-  const fields = { ...(report.fields ?? {}) };
+  const fields = report.type === "snag.reported" ? snagFields(report.fields) : { ...(report.fields ?? {}) };
   if (report.ticket) {
     s.ticket = report.ticket;
     s.ticketReported = true;
