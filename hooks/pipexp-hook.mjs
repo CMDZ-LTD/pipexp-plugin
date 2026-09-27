@@ -7,6 +7,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { hook, loadSession, report, runtimeOf, sessionFile } from "../core/run.mjs";
 import { startContext } from "../core/stages.mjs";
 import { notice } from "../core/connect.mjs";
+import { startNotice } from "../core/health.mjs";
 import { hasStop, steerOutput, takeSteers } from "../core/steer.mjs";
 
 let raw = "";
@@ -31,7 +32,8 @@ process.stdin.on("end", () => {
     const input = adapt(runtime, JSON.parse(raw));
     if (input) {
       hook(input, runtime);
-      if (input.hook_event_name === "SessionStart") out = noticeOutput(runtime, notice(runtime), stagesText(input, true));
+      // Connecting first; else a board that is down or refusing events, once a day each (CMD-88). The stages go as context.
+      if (input.hook_event_name === "SessionStart") out = noticeOutput(runtime, notice(runtime) || startNotice(), stagesText(input, true));
       // A note or stop someone sent from the board (CMD-80), fetched earlier by the flush: shown once, here.
       else if (["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop"].includes(input.hook_event_name)) {
         const steers = takeSteers(input.session_id);
