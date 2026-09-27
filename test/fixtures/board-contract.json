@@ -117,5 +117,15 @@
       "lastEventAt": "2026-09-26T08:00:00.000Z",
       "canRestart": false
     }
+  },
+  "POST /questions": {
+    "questionId": "66666666-6666-4666-8666-666666666666",
+    "runId": "0b5c7c1e-4a8e-4d3a-9c55-2f1e6a7b8c90",
+    "question": "Keep the old export?",
+    "options": [
+      "Keep",
+      "Remove"
+    ],
+    "recipient": "ben-orbit"
   }
 }

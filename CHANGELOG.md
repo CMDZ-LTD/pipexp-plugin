@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A question can name who it waits on: `pipexp_ask_human` takes `recipient` and `pipexp ask` takes `--recipient`, a GitHub login (a leading @ is dropped). The board keeps such a question open a day by default, and after 4 working hours unanswered its standup shows the asker Blocked, waiting on that person (CMD-230, board #406). A login the board would refuse is refused here, before anything is asked. Minimal content sends no recipient. Without a timeout, the board now picks how long a question stays open (an hour, as before, when it names nobody).
+
 ## 0.1.14 (2026-09-27)
 
 - A session start says, once a day, when events are waiting on a board it can't reach or the board refused one, with the fix (CMD-88). Before, you found out only when a card was missing. Connecting and a refused key were already said.

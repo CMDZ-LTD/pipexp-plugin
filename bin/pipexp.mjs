@@ -6,7 +6,7 @@
 //   pipexp disconnect                    forget this machine's key
 //   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
-//   pipexp ask "<question>" [--context ...] [--option A --option B] [--timeout-min 60]
+//   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
 //   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
@@ -52,6 +52,7 @@ const { positionals, values } = parseArgs({
     context: { type: "string" },
     option: { type: "string", multiple: true },
     "timeout-min": { type: "string" },
+    recipient: { type: "string" },
     "question-id": { type: "string" },
     "key-stdin": { type: "boolean" },
     raw: { type: "boolean" },
@@ -171,7 +172,7 @@ async function main() {
   }
   if (cmd === "ask") {
     // The link goes to stderr at once, so a person nearby can answer before the wait ends; stdout stays the answer.
-    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || 60, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
+    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || undefined, recipient: values.recipient, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
