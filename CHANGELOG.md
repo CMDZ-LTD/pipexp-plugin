@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## 0.1.19 (2026-09-27)
+
+- Agent activity (CMD-518, board #520). Working, Idle, Paused, Blocked and Waiting are reported apart from the workflow stage, only to a board that advertises agent-activity-v1. At most one activity beat every 4 minutes and 300 per run, so a run stays under the board's 2,000 events. A Codex turn with no prompt (a delegated turn) is Working at its first tool call; a finish still ends the turn idle; a board stop or an explicit blocked or paused status holds until a new turn. An agent-lane session that reports its own stage waits for you at each turn's end. A PR is unlinked only when the work changes. New tool pipexp_report_status reports a status with a reason.
+
 ## 0.1.18 (2026-09-27)
 
 - A snag always reaches the board (CMD-370). An agent could call pipexp_report_snag with a kind the board does not know ("flaky") or a note in place of what, and the board refused the whole snag. Now a known kind passes as it is, any other goes as snag with the agent's word kept in theme, and what falls back to the note, so nothing is lost. The same holds for pipexp event snag.reported.
