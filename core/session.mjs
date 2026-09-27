@@ -459,7 +459,7 @@ export function onReport(state, report, ctx) {
     out.push(event(s, "activity.reported", {}, at));
     return { state: s, events: out };
   }
-  if (report.type === "stage" || report.type === "run.started") activity(s, "working", at, "agent");
+  if (report.type === "run.started") activity(s, "working", at, "agent");
   // A finished workflow says nothing about whether the session is still working: only a blocked finish is a status.
   if (report.type === "run.finished" && fields.outcome === "blocked") activity(s, "blocked", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
   if (report.type === "stage") {
@@ -488,6 +488,9 @@ export function onReport(state, report, ctx) {
       s.skill = skill;
       if (skill !== "agent") s.fields = { ...(ctx.probe.skillInfo?.(s.cwd, skill) ?? {}), ...s.fields };
     }
+    // Working is observed on the lane now in use only: the lane left above got its usage with the observation it had,
+    // so after ship, shepherd, ship the board's row is ship, never a tie with the lane just left (CMD-518).
+    activity(s, "working", at, "agent");
     s.explicit = true;
     if (moved || metadataChanged || changedTicket || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
     enter(s, report.stage, at, out, fields, true);
