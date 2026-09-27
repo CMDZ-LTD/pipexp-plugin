@@ -30,6 +30,14 @@ export async function call(creds, path, init = {}, timeoutMs = 5000) {
 const cappedFile = () => join(stateDir(), "capped");
 export const isCapped = (runId) => existsSync(cappedFile()) && readFileSync(cappedFile(), "utf8").split("\n").includes(runId);
 
+/**
+ * CMD-374: a board from before #442 does not know origin, and its strict schema refuses it (400, unrecognized key).
+ * True for that answer only, so the same event is sent again without origin and lands as it always did.
+ */
+export const unknownOrigin = (res) =>
+  res.status === 400 && Array.isArray(res.body?.details) &&
+  res.body.details.some((d) => (Array.isArray(d?.keys) && d.keys.includes("origin")) || /"origin"/.test(String(d?.message ?? "")));
+
 /** One line per refused send: time, type, status and the first failing field. Never a value. Last 100 kept. */
 function logRefusal(event, status, body) {
   try {
@@ -71,12 +79,21 @@ export async function post(creds, event) {
       if (!isCapped(event.runId)) appendFileSync(cappedFile(), event.runId + "\n");
     } catch {}
   }
+  if (event.origin && unknownOrigin(res)) {
+    const { origin: _origin, ...rest } = event;
+    return post(creds, rest);
+  }
   if (res.status === 403 && event.repo && /No project for this repo/.test(res.body?.error ?? "")) {
     const { markRefused } = await import("./stages.mjs");
     markRefused(event.repo);
+    // An event that says where it runs (CMD-374) is not sent again without its repo: the board would not file it on
+    // this key's project anyway. It is dropped quietly: a repo with no project here is not a fault to warn about.
+    if (event.origin) return "refused";
     const { repo: _repo, ...rest } = event;
     return post(creds, rest);
   }
+  // A session outside every project's repo (CMD-374): refused by design, so not logged as a fault either.
+  if (res.status === 403 && event.origin && /No project for this repo/.test(res.body?.error ?? "")) return "refused";
   if (res.status >= 400 && res.status < 500) {
     logRefusal(event, res.status, res.body);
     return "refused";

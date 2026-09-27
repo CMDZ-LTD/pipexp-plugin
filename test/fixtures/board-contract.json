@@ -1,5 +1,5 @@
 {
-  "_source": "CMDZ-LTD/agent-pipeline lib/plugin-contract.test.ts. Keep in step: the board must accept every one of these.",
+  "_source": "CMDZ-LTD/agent-pipeline lib/plugin-contract.test.ts. Keep in step: the board must accept every one of these. origin (repo | none) is accepted since board #442 (CMD-374).",
   "run.started": {
     "type": "run.started",
     "eventId": "11111111-1111-4111-8111-111111111111",
@@ -15,7 +15,8 @@
     "pluginVersion": "pipexp 0.1.0",
     "machineId": "7d2f0a9b-1c3e-4f5a-8b6d-9e0f1a2b3c4d",
     "claim": "new",
-    "tokensReported": false
+    "tokensReported": false,
+    "origin": "repo"
   },
   "run.started (no ticket)": {
     "type": "run.started",
@@ -33,7 +34,8 @@
     "machineId": "7d2f0a9b-1c3e-4f5a-8b6d-9e0f1a2b3c4d",
     "claim": "new",
     "tokensReported": false,
-    "ticket": null
+    "ticket": null,
+    "origin": "repo"
   },
   "step.entered": {
     "type": "step.entered",
@@ -47,7 +49,8 @@
     "counters": {
       "humanTurns": 3,
       "interrupts": 1
-    }
+    },
+    "origin": "repo"
   },
   "usage.reported": {
     "type": "usage.reported",
@@ -74,7 +77,8 @@
         "wallSeconds": 120,
         "runtimeVersion": "codex 0.155.1"
       }
-    ]
+    ],
+    "origin": "repo"
   },
   "snag.reported": {
     "type": "snag.reported",
@@ -87,7 +91,8 @@
     "kind": "snag",
     "theme": "tests",
     "what": "Flaky test",
-    "costMin": null
+    "costMin": null,
+    "origin": "repo"
   },
   "run.finished": {
     "type": "run.finished",
@@ -97,7 +102,8 @@
     "skill": "agent",
     "runtime": "codex",
     "outcome": "ready",
-    "prNumber": null
+    "prNumber": null,
+    "origin": "repo"
   },
   "machine.audit": {
     "type": "machine.audit",
@@ -131,6 +137,7 @@
       "Keep",
       "Remove"
     ],
-    "recipient": "ben-orbit"
+    "recipient": "ben-orbit",
+    "origin": "repo"
   }
 }

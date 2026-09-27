@@ -12,8 +12,9 @@ import { ask } from "../core/ask.mjs";
 // The board's POST /questions fixture (agent-pipeline lib/plugin-contract.test.ts).
 const contract = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"))["POST /questions"];
 
-async function board() {
+async function board({ old = false } = {}) {
   const asked = [];
+  const polled = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -21,9 +22,15 @@ async function board() {
       res.setHeader("content-type", "application/json");
       if (req.method === "POST" && req.url === "/questions") {
         asked.push(JSON.parse(body));
+        // A board from before #442: /questions answers an unknown key with its path and message only.
+        if (old && "origin" in JSON.parse(body)) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ error: "Invalid question", details: [{ path: [], message: "Unrecognized key: \"origin\"" }] }));
+        }
         res.statusCode = 201;
         return res.end("{}");
       }
+      if (req.method === "GET" && req.url.startsWith("/questions/")) polled.push(req.url);
       if (req.method === "GET" && req.url.startsWith("/questions/")) return res.end(JSON.stringify({ status: "answered", answer: "Keep it", answeredBy: "ben@acme.test" }));
       res.statusCode = 202;
       res.end("{}");
@@ -32,7 +39,7 @@ async function board() {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const home = mkdtempSync(join(tmpdir(), "pipexp-ask-"));
   writeFileSync(join(home, "credentials.json"), JSON.stringify({ url: "http://127.0.0.1:" + server.address().port, key: "pipexp_rk_" + "a".repeat(43) }));
-  return { home, asked, close: () => new Promise((r) => server.close(r)) };
+  return { home, asked, polled, close: () => new Promise((r) => server.close(r)) };
 }
 
 function run(file, args, home, stdin = "") {
@@ -63,9 +70,13 @@ test("pipexp_ask_human and pipexp ask name who the question waits on, and leave 
     // Without a timeout the board keeps a question naming someone else open a day (an hour without one): none is sent.
     assert.equal("timeoutMin" in mcp || "timeoutMin" in cli, false);
     assert.equal(plain.timeoutMin, 30);
+    // CMD-374: each question says where it was asked, so the board never files an off-repo one on this key's own
+    // project; the poll finds it the same way, by origin and run.
+    for (const q of b.asked) assert.ok(["repo", "none"].includes(q.origin), "every question says its origin");
+    assert.ok(b.polled.length && b.polled.every((u) => /[?&]origin=(repo|none)&run=[0-9a-f-]{36}/.test(u)), b.polled.join(" "));
     assert.equal("recipient" in plain, false);
     // Only fields the board's strict schema takes.
-    for (const q of b.asked) for (const key of Object.keys(q)) assert.ok(key in contract || ["repo", "ticket", "context", "timeoutMin"].includes(key), "sends " + key);
+    for (const q of b.asked) for (const key of Object.keys(q)) assert.ok(key in contract || ["repo", "ticket", "context", "timeoutMin", "origin"].includes(key), "sends " + key);
   } finally {
     await b.close();
   }
@@ -90,6 +101,18 @@ test("a recipient that is not a GitHub login is refused before anything is asked
     assert.equal("recipient" in b.asked[1], false);
   } finally {
     process.env.PIPEXP_HOME = before;
+    await b.close();
+  }
+});
+
+test("an older board that does not know origin still takes the question, asked again without it, and polled without it (CMD-374)", async () => {
+  const b = await board({ old: true });
+  try {
+    assert.equal(await run("../bin/pipexp.mjs", ["ask", "Ship it?", "--session", "s-old"], b.home), "Keep it\n");
+    assert.deepEqual(b.asked.map((q) => "origin" in q), [true, false]);
+    assert.equal(b.asked[0].questionId, b.asked[1].questionId, "the same question, once more");
+    assert.ok(b.polled.length && b.polled.every((u) => !u.includes("origin=")), b.polled.join(" "));
+  } finally {
     await b.close();
   }
 });
