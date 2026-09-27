@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.17 (2026-09-27)
 
 - Never lose a session on a flaky network (CMD-95). The outbox keeps events for 7 days instead of 500 events, and a board that answers with a server error costs one try an hour (up to 24), so a day-long outage loses nothing. While waiting, a stage's repeated heartbeats and a run's back-to-back usage snapshots merge, so the queue stays small. Anything dropped anyway is counted and reported in the next machine audit, and the Machines tab shows it (board #465). pipexp flush --verbose lists what waits by type and age, and why it stopped; pipexp status says how old the oldest is. Types and ages only, never values.
 
