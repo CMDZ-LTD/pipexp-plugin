@@ -12,7 +12,7 @@ import { ask } from "../core/ask.mjs";
 // The board's POST /questions fixture (agent-pipeline lib/plugin-contract.test.ts).
 const contract = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"))["POST /questions"];
 
-async function board() {
+async function board({ old = false } = {}) {
   const asked = [];
   const polled = [];
   const server = createServer((req, res) => {
@@ -22,6 +22,11 @@ async function board() {
       res.setHeader("content-type", "application/json");
       if (req.method === "POST" && req.url === "/questions") {
         asked.push(JSON.parse(body));
+        // A board from before #442: /questions answers an unknown key with its path and message only.
+        if (old && "origin" in JSON.parse(body)) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ error: "Invalid question", details: [{ path: [], message: "Unrecognized key: \"origin\"" }] }));
+        }
         res.statusCode = 201;
         return res.end("{}");
       }
@@ -96,6 +101,18 @@ test("a recipient that is not a GitHub login is refused before anything is asked
     assert.equal("recipient" in b.asked[1], false);
   } finally {
     process.env.PIPEXP_HOME = before;
+    await b.close();
+  }
+});
+
+test("an older board that does not know origin still takes the question, asked again without it, and polled without it (CMD-374)", async () => {
+  const b = await board({ old: true });
+  try {
+    assert.equal(await run("../bin/pipexp.mjs", ["ask", "Ship it?", "--session", "s-old"], b.home), "Keep it\n");
+    assert.deepEqual(b.asked.map((q) => "origin" in q), [true, false]);
+    assert.equal(b.asked[0].questionId, b.asked[1].questionId, "the same question, once more");
+    assert.ok(b.polled.length && b.polled.every((u) => !u.includes("origin=")), b.polled.join(" "));
+  } finally {
     await b.close();
   }
 });

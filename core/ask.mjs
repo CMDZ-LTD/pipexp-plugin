@@ -1,7 +1,7 @@
 // Ask a person on the board and wait for the answer. The question shows in the board's "Needs me" list.
 import { randomUUID } from "node:crypto";
 import { credentials } from "./config.mjs";
-import { call } from "./send.mjs";
+import { call, unknownOrigin } from "./send.mjs";
 import { contentFor, loadSession, report } from "./run.mjs";
 import { scrub } from "./scrub.mjs";
 
@@ -60,6 +60,12 @@ export async function ask({ sessionId, question, context, options, timeoutMin, r
     let asked;
     try {
       asked = await call(creds, "/questions", { method: "POST", body: JSON.stringify(body) }, 10_000);
+      // An older board does not know origin (CMD-374): ask again without it, and poll without it.
+      if (body.origin && unknownOrigin(asked)) {
+        delete body.origin;
+        origin = null;
+        asked = await call(creds, "/questions", { method: "POST", body: JSON.stringify(body) }, 10_000);
+      }
     } catch (e) {
       return { status: "failed", reason: "board unreachable (" + (e.cause?.code ?? e.name) + ")" };
     }

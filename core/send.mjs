@@ -30,6 +30,14 @@ export async function call(creds, path, init = {}, timeoutMs = 5000) {
 const cappedFile = () => join(stateDir(), "capped");
 export const isCapped = (runId) => existsSync(cappedFile()) && readFileSync(cappedFile(), "utf8").split("\n").includes(runId);
 
+/**
+ * CMD-374: a board from before #442 does not know origin, and its strict schema refuses it (400, unrecognized key).
+ * True for that answer only, so the same event is sent again without origin and lands as it always did.
+ */
+export const unknownOrigin = (res) =>
+  res.status === 400 && Array.isArray(res.body?.details) &&
+  res.body.details.some((d) => (Array.isArray(d?.keys) && d.keys.includes("origin")) || /"origin"/.test(String(d?.message ?? "")));
+
 /** One line per refused send: time, type, status and the first failing field. Never a value. Last 100 kept. */
 function logRefusal(event, status, body) {
   try {
@@ -70,6 +78,10 @@ export async function post(creds, event) {
       mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
       if (!isCapped(event.runId)) appendFileSync(cappedFile(), event.runId + "\n");
     } catch {}
+  }
+  if (event.origin && unknownOrigin(res)) {
+    const { origin: _origin, ...rest } = event;
+    return post(creds, rest);
   }
   if (res.status === 403 && event.repo && /No project for this repo/.test(res.body?.error ?? "")) {
     const { markRefused } = await import("./stages.mjs");

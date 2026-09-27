@@ -80,6 +80,27 @@ test("an older event with no origin keeps today's behaviour: a refused repo is s
   }
 });
 
+test("an older board that does not know origin still gets every event: refused for origin (400), sent again without it", async () => {
+  // What a board from before #442 answers: its strict schema names the unknown key (agent-pipeline convex/http.ts).
+  const old = (e) => ("origin" in e ? [400, { error: "Invalid event", details: [{ code: "unrecognized_keys", keys: ["origin"], path: [], message: "Unrecognized key: \"origin\"" }] }] : [201, { ok: true }]);
+  const b = await board(old);
+  try {
+    assert.equal(await post(b.creds, step({ repo: "acme/app", origin: "repo" })), "sent");
+    assert.deepEqual(b.bodies.map((e) => e.origin ?? null), ["repo", null]);
+    assert.equal(b.bodies[1].repo, "acme/app", "only origin is left out");
+    // A 400 for another field is not retried without origin.
+    const other = await board(() => [400, { error: "Invalid event", details: [{ path: ["stage"], message: "bad" }] }]);
+    try {
+      assert.equal(await post(other.creds, step({ origin: "repo" })), "refused");
+      assert.equal(other.bodies.length, 1);
+    } finally {
+      await other.close();
+    }
+  } finally {
+    await b.close();
+  }
+});
+
 test("a manager reports its own lane, waits in manager:S4 at each turn's end, picks up its stage at the next prompt, and never lands in a builder stage", () => {
   const T0 = Date.parse("2026-09-27T10:00:00Z");
   const MIN = 60_000;
