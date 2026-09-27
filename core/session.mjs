@@ -346,7 +346,8 @@ export function onHook(state, input, ctx) {
     // A new turn is working, whatever was held (a board stop, or a status the agent reported); in the same turn a hold
     // stays. After a finish, only a turn that started since then is new work.
     const since = !s.finished || (!!s.finishedTurn && s.turnId !== s.finishedTurn);
-    if (newTurn || (since && !held(s))) activity(s, "working", at);
+    // The same work keeps its one-line description (an explicit note); a new turn starts without one (CMD-518).
+    if (newTurn || (since && !held(s))) activity(s, "working", at, "hook", !newTurn && s.activity?.state === "working" ? s.activity.note : undefined);
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
     // Done (CMD-370: a finish was undone 144 ms later), and a later turn's never reopen it; only its activity goes.
     if (s.finished) {
@@ -360,7 +361,11 @@ export function onHook(state, input, ctx) {
     const pushed = PR_CMD.test(cmd) && !didFail;
     const pr = pushed ? prFrom(input.tool_response) : null;
     if (pr) { s.prNumber = pr; s.prDropped = false; s.ignorePrBranch = null; }
-    if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) {
+      // Another branch is other work: the note described the old one.
+      if (s.activity?.note) activity(s, s.activity.state, at, s.activity.source);
+      out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    }
     // A push or PR that failed (no remote, no auth) leaves the card where it was.
     const guess = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
     const stage = guess === STAGES.pr && !pushed ? null : guess;

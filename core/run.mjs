@@ -72,8 +72,14 @@ function commit(state, events) {
   // Where the session runs (CMD-374): "repo" in a GitHub checkout, "none" elsewhere. The board never files an event
   // that says so on the key's own project, so a session outside every project's repo stays off every board.
   if (!state.origin && state.cwd) state.origin = repoOf(state.cwd) ? "repo" : "none";
-  writeJson(sessionFile(state.sessionId), state);
   const enabled = supportsActivity(state.cwd);
+  // An observation this board cannot take is stripped below, so it is not marked sent: the first work once the board
+  // takes activity sends it at once (CMD-518, upgrading from 0.1.18).
+  if (!enabled) {
+    delete state.activitySent;
+    delete state.activitySentAt;
+  }
+  writeJson(sessionFile(state.sessionId), state);
   const minimal = contentFor(state.cwd) === "minimal";
   const where = (e) => {
     const out = { ...e, ...(state.repo && !e.repo && { repo: state.repo }), ...(state.origin && !e.origin && { origin: state.origin }) };
@@ -157,10 +163,21 @@ export function hook(input, runtime = runtimeOf()) {
   const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
   if (steer) markChecked(steer);
   // A session starting where the cached lanes are old or missing: the flush reads them again (CMD-421).
-  const stagesCwd = input.hook_event_name === "SessionStart" && input.cwd && startContext(input.cwd).stale ? input.cwd : null;
+  const stagesCwd = stagesDue(input);
   if ((events.length || steer || stagesCwd || prFor) && credentials()) kick(steer ?? undefined, stagesCwd ?? undefined, prFor ?? undefined);
   prune();
   return events;
+}
+
+/**
+ * The folder whose lanes the flush should read again after this hook (CMD-421), or null: a session starting where the
+ * cached answer is old or missing, and any hook where it was written by 0.1.18 (no capabilities), so a long-lived thread
+ * learns at once that the board takes activity (CMD-518). Read once: the answer then has capabilities.
+ */
+export function stagesDue(input) {
+  if (!input?.cwd) return null;
+  const { stale, legacy } = startContext(input.cwd);
+  return legacy || (input.hook_event_name === "SessionStart" && stale) ? input.cwd : null;
 }
 
 /**
