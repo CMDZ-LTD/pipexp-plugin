@@ -55,6 +55,8 @@ export function context(runtime, transcriptPath, known, now = Date.now(), cwd = 
     // Read once per session: the first line of a Codex transcript can be tens of KB.
     runtimeVersion: known ?? probe.runtimeVersion(runtime, transcriptPath),
     content: contentFor(cwd),
+    // Whether this folder's board takes activity (CMD-518): without it, no activity beat is made or counted.
+    activity: supportsActivity(cwd),
     // Set by a restart for the new session it starts (core/restart.mjs).
     parentRunId: process.env.PIPEXP_PARENT_RUN || null,
     ticket: process.env.PIPEXP_TICKET || null,

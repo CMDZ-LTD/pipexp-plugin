@@ -66,7 +66,7 @@ test("Gemini CLI: BeforeAgent, AfterTool and AfterAgent map to prompt, tool and 
     [4, { ...common, hook_event_name: "AfterTool", tool_name: "run_shell_command", tool_input: { command: "git push" }, tool_response: { llmContent: "Output: rejected\nExit Code: 1" } }],
     [5, { ...common, hook_event_name: "AfterAgent", prompt_response: "done" }],
   ]);
-  assert.deepEqual(brief(events), ["run.started", "step.entered agent:S1", "activity.reported", "usage.reported agent:S1", "step.entered agent:S2", "step.entered agent:S2", "usage.reported agent:S2", "step.entered agent:S5"]);
+  assert.deepEqual(brief(events), ["run.started", "step.entered agent:S1", "activity.reported", "usage.reported agent:S1", "step.entered agent:S2", "usage.reported agent:S2", "step.entered agent:S5"]);
   assert.ok(events.every((e) => e.runtime === "gemini"));
   assert.equal(events[0].tokensReported, undefined);
   assert.equal(adapt("gemini", { hook_event_name: "AfterTool", session_id: "g", tool_name: "x", tool_response: { error: { message: "no" } } }, {}).hook_event_name, "PostToolUseFailure");

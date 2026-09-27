@@ -39,7 +39,6 @@ test("a plain Codex session: start, explore, build, test, PR, waiting, end", () 
     "run.started",
     "step.entered agent:S1",
     "activity.reported",
-    "step.entered agent:S1",
     "usage.reported agent:S1",
     "step.entered agent:S2",
     "usage.reported agent:S2",
@@ -103,14 +102,14 @@ test("a quick edit-test loop moves the card at most once a minute; a PR always m
   assert.deepEqual(brief(events).filter((e) => e.startsWith("step")), ["step.entered agent:S1", "step.entered agent:S2", "step.entered agent:S4"]);
 });
 
-test("tool activity refreshes the observation at least once a minute", () => {
+test("a long test run re-sends its stage every 30 minutes, so the card never shows Stalled; activity between goes as its own beat", () => {
   const { events } = play([
     [0, { hook_event_name: "UserPromptSubmit" }],
     [1, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npx playwright test" } }],
     [20, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "sleep 600" } }],
     [32, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "gh run watch" } }],
   ]);
-  assert.deepEqual(brief(events).slice(-2), ["step.entered agent:S3", "step.entered agent:S3"]);
+  assert.deepEqual(brief(events).slice(-2), ["activity.reported", "step.entered agent:S3"]);
 });
 
 test("the next prompt after the session was ended starts it again as a resume", () => {
@@ -158,7 +157,8 @@ test("a skill reporting ship stages moves the run into the ship lane, with its f
   assert.equal(started.skillTree, "0123456789abcdef");
   assert.equal(started.runId, start.state.runId, "the session's card becomes the ship card");
   const tool = onHook(r.state, { ...base, hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }, ctx(T0 + 5 * MIN));
-  assert.deepEqual(brief(tool.events), ["step.entered ship:S1"]);
+  // No stage guessed: only the activity beat (4 minutes after the report said working).
+  assert.deepEqual(brief(tool.events), ["activity.reported"]);
   assert.equal(tool.events[0].activity.state, "working");
   const next = onReport(tool.state, { type: "stage", stage: "ship:S4", fields: { counters: { reviewRound: 2 } } }, ctx(T0 + 9 * MIN));
   assert.deepEqual(brief(next.events), ["usage.reported ship:S1", "step.entered ship:S4"]);

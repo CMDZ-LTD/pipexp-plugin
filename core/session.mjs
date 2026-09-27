@@ -28,7 +28,17 @@ export function snagFields(f = {}) {
 }
 // A manager's own lane (CMD-374): a session that reports manager:Sx waits there, never in a builder's stage.
 export const MANAGER_WAITING = "manager:S4";
-const BEAT_MS = 60_000;
+// Each lane with a stage that waits on its person, and the stage it goes back to when none was remembered (CMD-518).
+// Other lanes (ship and custom workflows) keep their stage at a turn's end: only their activity goes idle.
+const WAITING = { agent: STAGES.waiting, manager: MANAGER_WAITING };
+const RESUME = { agent: STAGES.explore, manager: "manager:S1" };
+// A stage heartbeat, so a long test run or CI wait never shows Stalled on a board without activity.
+const BEAT_MS = 30 * 60_000;
+// Activity heartbeats (CMD-518): the board reads "working" as fresh for 5 minutes, so a busy turn sends one at most
+// every 4, only from a real hook. Every event counts toward the board's 2,000 per run, and after a 429 only run.finished
+// goes, so a run sends at most ACTIVITY_BEATS of them; past that, activity goes only when it changes.
+const ACTIVITY_BEAT_MS = 4 * 60_000;
+export const ACTIVITY_BEATS = 500;
 export const ACTIVITY_STATES = ["working", "idle", "waiting", "blocked", "paused"];
 const held = (s) => ["waiting", "blocked", "paused"].includes(s.activity?.state) || (s.activity?.source === "agent" && s.activity.state === "idle");
 const activity = (s, state, at, source = "hook", note) => {
@@ -129,6 +139,11 @@ export function newState(input, ctx) {
 function event(s, type, fields, at) {
   const out = { eventId: randomUUID(), runId: s.runId, occurredAt: new Date(at).toISOString(), skill: s.skill, runtime: s.runtime, type,
     sessionId: s.sessionId, ...(s.activity && { activity: s.activity }) };
+  // What the board last heard of this session's activity, and when.
+  if (s.activity) {
+    s.activitySent = s.activity.state;
+    s.activitySentAt = at;
+  }
   if (s.ticket) out.ticket = s.ticket;
   if (s.attemptId) out.attemptId = s.attemptId;
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) out[k] = v;
@@ -281,8 +296,8 @@ export function onHook(state, input, ctx) {
     if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
-    // A manager back from waiting picks up the stage it was in (CMD-374).
-    else if (s.skill === "manager" && s.stage === MANAGER_WAITING) enter(s, s.managerStage ?? "manager:S1", at, out);
+    // Back from waiting, a session that reports its own stages picks up the one it was in (CMD-374, CMD-518).
+    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage ?? RESUME[s.skill], at, out);
     if (!out.length) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
@@ -312,6 +327,18 @@ export function onHook(state, input, ctx) {
       if (s.fails === FAILS_FOR_SNAG)
         out.push(event(s, "snag.reported", { stage: s.stage ?? undefined, kind: "snag", theme: "checks failing", what: "The same checks failed " + FAILS_FOR_SNAG + " times in a row: " + cmd.slice(0, 200), costMin: null }, at));
     }
+    // Activity the board has not heard yet: a change at once (a delegated turn has no UserPromptSubmit, so its first tool
+    // call is where it starts working), else a heartbeat within the budget. Nothing when the board cannot take it.
+    if (s.activity && ctx.activity !== false && !out.some((e) => e.activity)) {
+      const changed = s.activity.state !== s.activitySent;
+      const beats = s.beats?.[s.runId] ?? 0;
+      if (changed) out.push(event(s, "activity.reported", {}, at));
+      else if (s.activity.state === "working" && at - (s.activitySentAt ?? 0) >= ACTIVITY_BEAT_MS && beats < ACTIVITY_BEATS) {
+        s.beats = { ...s.beats, [s.runId]: beats + 1 };
+        // _beat: while the board is out of reach, the outbox keeps only the newest (core/queue.mjs).
+        out.push({ ...event(s, "activity.reported", {}, at), _beat: true });
+      }
+    }
   } else if (name === "Stop") {
     // The turn that finished the card ends: nothing to add.
     s.inTurn = false;
@@ -320,9 +347,11 @@ export function onHook(state, input, ctx) {
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
-    else if (s.skill === "manager") {
-      if (s.stage !== MANAGER_WAITING) s.managerStage = s.stage;
-      enter(s, MANAGER_WAITING, at, out);
+    // The agent and manager lanes have their own Waiting for you (CMD-374, CMD-518). managerStage: the stage to pick up
+    // at the next prompt, for either lane (the name predates the agent lane).
+    else if (WAITING[s.skill]) {
+      if (s.stage !== WAITING[s.skill]) s.managerStage = s.stage;
+      enter(s, WAITING[s.skill], at, out);
     }
     else out.push(usageMarker(s, s.stage, at));
     if (!out.some((e) => e.type !== "usage.reported")) out.push(event(s, "activity.reported", {}, at));
@@ -333,7 +362,7 @@ export function onHook(state, input, ctx) {
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
     // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
     // (closed, killed) is abandoned. A skill run that never reported its own finish did not complete.
-    const handedBack = s.prNumber || (!s.explicit && s.stage === STAGES.waiting) || s.stage === MANAGER_WAITING;
+    const handedBack = s.prNumber || s.stage === STAGES.waiting || s.stage === MANAGER_WAITING;
     s.outcome = handedBack ? "ready" : "abandoned";
     out.push(event(s, "run.finished", { outcome: s.outcome, prNumber: s.prNumber }, at));
     s.finished = true;
@@ -388,7 +417,8 @@ export function onReport(state, report, ctx) {
     return { state: s, events: out };
   }
   if (report.type === "stage" || report.type === "run.started") activity(s, "working", at, "agent");
-  if (report.type === "run.finished") activity(s, fields.outcome === "blocked" ? "blocked" : "idle", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
+  // A finished workflow says nothing about whether the session is still working: only a blocked finish is a status.
+  if (report.type === "run.finished" && fields.outcome === "blocked") activity(s, "blocked", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
   if (report.type === "stage") {
     const skill = report.stage.split(":")[0];
     const moved = skill !== s.skill;
