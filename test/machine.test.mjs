@@ -47,3 +47,11 @@ test("after an upgrade deletes the old version folder, the shim runs the new one
   renameSync(join(cache, "0.1.9"), join(tmpdir(), "pipexp-gone-" + process.pid));
   assert.match(run(), /pipexp 0\.1\.10/, "the newest version runs, sorted as versions (0.1.10 after 0.1.9)");
 });
+
+test("a new machine connects to PipeXP's own address; one connected to the old Convex address keeps it (CMD-56)", async () => {
+  const { DEFAULT_URL } = await import("../core/connect.mjs");
+  assert.equal(DEFAULT_URL, "https://api.pipexp.dev");
+  const { saveCredentials, credentials } = await import("../core/config.mjs");
+  saveCredentials({ url: "https://exciting-ox-380.eu-west-1.convex.site", key: "pipexp_rk_" + "k".repeat(43) });
+  assert.equal(credentials().url, "https://exciting-ox-380.eu-west-1.convex.site", "an old machine is never moved");
+});

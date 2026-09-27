@@ -70,7 +70,8 @@ export function newState(input, ctx) {
     cwd: input.cwd ?? null,
     transcriptPath: input.transcript_path ?? null,
     skill: "agent",
-    ticket: null,
+    ticket: /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ctx.ticket ?? "") ? ctx.ticket : null,
+    ticketReported: /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ctx.ticket ?? ""),
     title: null,
     branch: null,
     stage: null,
@@ -83,7 +84,8 @@ export function newState(input, ctx) {
     explicit: false,
     shipOwned: false,
     prNumber: null,
-    fields: {},
+    // Started by a restart from the board (CMD-80): linked to the run it replaced, on the same ticket.
+    fields: /^[0-9a-f-]{36}$/i.test(ctx.parentRunId ?? "") ? { parentRunId: ctx.parentRunId } : {},
     fails: 0,
     lastSeenAt: ctx.now,
   };
@@ -118,6 +120,9 @@ function startFields(s, ctx, claim) {
     // Cursor keeps no token counts on the machine: the board says "Tokens not reported", never 0.
     ...(s.runtime === "cursor" && { tokensReported: false }),
     ...(ctx.content === "minimal" ? fields : s.fields),
+    // The card had a ticket and this branch has none: null drops it on the board (CMD-452, board #344). Left out, the
+    // board would keep the old one; a session that never had a ticket sends none, so an older board is never refused.
+    ...(!s.ticket && s.ticketDropped && { ticket: null }),
   };
 }
 
@@ -130,7 +135,9 @@ function refresh(s, ctx) {
   const git = ctx.probe.git(s.cwd) ?? {};
   if (git.branch && git.branch !== "HEAD" && git.branch !== s.gitBranch) {
     if (s.gitBranch) {
+      const had = s.ticket;
       s.ticket = ticketOf(git.branch) ?? (s.ticketReported ? s.ticket : null);
+      if (had && !s.ticket) s.ticketDropped = true;
       s.ticketReported = s.ticketReported && !ticketOf(git.branch);
       s.prNumber = null;
     }
