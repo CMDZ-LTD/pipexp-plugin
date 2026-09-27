@@ -40,6 +40,13 @@ const BEAT_MS = 30 * 60_000;
 const ACTIVITY_BEAT_MS = 4 * 60_000;
 export const ACTIVITY_BEATS = 300;
 export const ACTIVITY_STATES = ["working", "idle", "waiting", "blocked", "paused"];
+/** Why an explicit report cannot go, before anything is changed or sent; null when it can. */
+export function reportProblem(report) {
+  if (report?.type !== "activity") return null;
+  if (!ACTIVITY_STATES.includes(report.state)) return "Unknown activity state";
+  if (["waiting", "blocked", "paused"].includes(report.state) && !(typeof report.note === "string" && report.note.trim())) return "This status needs a reason";
+  return null;
+}
 // What the board takes as a sessionId (PipeXP #520 lib/event-schema.ts); any other id is left off, never the event.
 const SESSION_ID = /^[a-zA-Z0-9._-]{1,100}$/;
 const held = (s) => ["waiting", "blocked", "paused"].includes(s.activity?.state) || (s.activity?.source === "agent" && s.activity.state === "idle");
@@ -280,7 +287,11 @@ export function onHook(state, input, ctx) {
   // Codex names each turn: turn_id is on UserPromptSubmit, PostToolUse and Stop (its hook input schemas require it). A
   // hook in a turn other than the last one seen starts a new turn even with no prompt: a delegated turn (a message from
   // another thread) fires no UserPromptSubmit. Runtimes that name no turn wait for a prompt, as before (CMD-518).
+  // A hook from a turn that already gave way to a later one arrived late (hooks are separate processes): it says nothing
+  // about the current turn, and after a move it must not touch the new project's run (CMD-518).
+  if (typeof input.turn_id === "string" && s.pastTurns?.includes(input.turn_id)) return { state: s, events: [] };
   const newTurn = typeof input.turn_id === "string" && !!s.turnId && input.turn_id !== s.turnId;
+  if (newTurn) s.pastTurns = [...(s.pastTurns ?? []), s.turnId].slice(-8);
   if (typeof input.turn_id === "string" && input.turn_id) s.turnId = input.turn_id;
   // PrFound comes from the flush, not the agent: it says nothing about whether the session is still going.
   if (name !== "PrFound") s.lastSeenAt = at;
@@ -437,8 +448,8 @@ export function onReport(state, report, ctx) {
     s.ticketReported = true;
   }
   if (report.type === "activity") {
-    if (!ACTIVITY_STATES.includes(report.state)) throw new Error("Unknown activity state");
-    if (["waiting", "blocked", "paused"].includes(report.state) && !words(report.note)) throw new Error("This status needs a reason");
+    const problem = reportProblem(report);
+    if (problem) throw new Error(problem);
     activity(s, report.state, at, report.source === "hook" ? "hook" : "agent", ctx.content === "minimal" ? undefined : words(report.note));
     // Status changes do not reopen a finished workflow or claim its ticket is complete.
     if (!s.started || changedTicket) start(s, ctx, s.started ? "resume" : "new", out);
@@ -462,7 +473,8 @@ export function onReport(state, report, ctx) {
       if (fromSkillLane || s.runs[skill]) {
         // Another skill lane: its own run, started now, and a child of the lane it came from.
         const parent = s.runs.ship ?? s.runId;
-        s.runId = s.runs[skill] ?? uuid5("pipexp/session/" + s.sessionId + "/" + skill);
+        // A session that moved repo (s.scope) names its lane runs after that repo too, so no run id is in two projects.
+        s.runId = s.runs[skill] ?? uuid5("pipexp/session/" + s.sessionId + (s.scope ? "/repo/" + s.scope : "") + "/" + skill);
         if (!s.runs[skill]) {
           s.started = false;
           s.startedAt = new Date(at).toISOString();

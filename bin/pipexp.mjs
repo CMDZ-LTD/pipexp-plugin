@@ -5,6 +5,7 @@
 //   pipexp stages [--raw]                this repo's lanes and stage ids on the board (--raw: JSON)
 //   pipexp disconnect                    forget this machine's key
 //   pipexp stage <lane:stage> [--ticket ABC-12] [--counters '{"reviewRound":2}'] [--replay]
+//   pipexp activity <working|idle|waiting|blocked|paused> [--note "why"] [--ticket ABC-12]   this session's status
 //   pipexp event <type> --json '{...}'   any board event type (snag.reported, run.finished, gate.checked, review.done, run.started)
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
@@ -23,7 +24,7 @@ import { installCursor, installOpencode, uninstallCursor } from "../core/install
 import { ask } from "../core/ask.mjs";
 import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
-import { contentFor, currentSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { contentFor, currentSession, explicitReport, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
@@ -64,6 +65,7 @@ const { positionals, values } = parseArgs({
     runtime: { type: "string" },
     claim: { type: "string" },
     lane: { type: "string" },
+    note: { type: "string" },
   },
 });
 const [cmd, arg] = positionals;
@@ -173,7 +175,17 @@ async function main() {
     if (values.counters) fields.counters = parse(values.counters, "--counters");
     if (values.replay) fields.replay = true;
     if (values.claim && !["new", "resume", "takeover"].includes(values.claim)) fail("claim is new, resume or takeover");
-    report(session(), { type: "stage", stage: arg, ticket: values.ticket, claim: values.claim, fields }, runtime);
+    // The same path as the MCP tool (core/run.mjs explicitReport), from this folder: work in another project's repo
+    // moves the session only once the board confirmed it. A refusal is said on stderr; a script still exits 0.
+    const r = await explicitReport(session(), { type: "stage", stage: arg, ticket: values.ticket, claim: values.claim, fields }, process.cwd(), runtime);
+    if (r.error) process.stderr.write("pipexp: " + r.error + "\n");
+    return;
+  }
+  if (cmd === "activity") {
+    if (values.ticket && !TICKET.test(values.ticket)) fail("ticket looks like ABC-123");
+    if (values.note !== undefined && values.note.length > 300) fail("note is at most 300 characters");
+    const r = await explicitReport(session(), { type: "activity", state: arg, note: values.note, ticket: values.ticket }, process.cwd(), runtime);
+    if (r.error) process.stderr.write("pipexp: " + r.error + "\n");
     return;
   }
   if (cmd === "event") {
@@ -189,7 +201,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, activity, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

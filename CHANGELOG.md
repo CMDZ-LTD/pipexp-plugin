@@ -4,7 +4,7 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## 0.1.19 (2026-09-27)
 
-- Agent activity (CMD-518, board #520). Working, Idle, Paused, Blocked and Waiting are reported apart from the workflow stage, only to a board that advertises agent-activity-v1. At most one activity beat every 4 minutes and 300 per run, so a run stays under the board's 2,000 events. A Codex turn with no prompt (a delegated turn) is Working at its first tool call; a finish still ends the turn idle; a board stop or an explicit blocked or paused status holds until a new turn. An agent-lane session that reports its own stage waits for you at each turn's end. A PR is unlinked only when the work changes. New tool pipexp_report_status reports a status with a reason.
+- Agent activity (CMD-518, board #520). Working, Idle, Paused, Blocked and Waiting are reported apart from the workflow stage, only to a board that advertises agent-activity-v1. At most one activity beat every 4 minutes and 300 per run, so a run stays under the board's 2,000 events. A Codex turn with no prompt (a delegated turn) is Working at its first tool call; a finish still ends the turn idle; a board stop or an explicit blocked or paused status holds until a new turn. An agent-lane session that reports its own stage waits for you at each turn's end. A PR is unlinked only when the work changes. New tool pipexp_report_status (and pipexp activity from scripts) reports a status with a reason. A session whose work moves to another project's repository ends its run in the old project and reports on a new run in the new one, only after the board confirmed this machine may report there; otherwise nothing is moved or sent.
 
 ## 0.1.18 (2026-09-27)
 

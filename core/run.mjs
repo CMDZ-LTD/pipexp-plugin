@@ -10,9 +10,9 @@ import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { newState, onHook, onIdle, onReport, PR_CMD, commandOf, uuid5 } from "./session.mjs";
+import { newState, onHook, onIdle, onReport, PR_CMD, commandOf, reportProblem, uuid5 } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
-import { boardContent, repoOf, routedRepo, startContext, supportsActivity } from "./stages.mjs";
+import { boardContent, repoOf, routedRepo, stagesFor, startContext, supportsActivity } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 import { restartPlan, startRestart } from "./restart.mjs";
 
@@ -182,7 +182,10 @@ function moveScope(old, cwd) {
   // Tokens from here on belong to the new run; the old run's usage went with its finish.
   s.startedAt = new Date(ctx.now).toISOString();
   s.reportingCwd = cwd;
+  // Lane runs started from here are named after this repo too (session.mjs onReport), never reusing another project's id.
+  s.scope = repo;
   for (const k of ["runtimeVersion", "owner", "turns", "interrupts", "inTurn", "turnId", "activity"]) if (old[k] !== undefined) s[k] = old[k];
+  if (old.pastTurns) s.pastTurns = old.pastTurns;
   return s;
 }
 
@@ -194,6 +197,9 @@ export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = fals
   const { state, events } = withSessionLock(sessionId, () => {
     let existing = loadSession(sessionId);
     const folder = cwd ?? existing?.cwd ?? process.cwd();
+    // Checked before anything moves or is sent: a report that cannot go never leaves half a move.
+    const problem = reportProblem(rep);
+    if (problem) throw new Error(problem);
     if (movesRepo(existing, cwd)) {
       if (!move || !repoOf(cwd)) throw new Error("This session belongs to another repository. Start a session in the new project instead.");
       existing = moveScope(existing, cwd);
@@ -212,6 +218,33 @@ export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = fals
 
 /** Whether a report from cwd names another repository than the session's. */
 export const movesRepo = (session, cwd) => !!session && !!cwd && repoOf(session.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase();
+
+/**
+ * The one path for an explicit stage or status report, from the MCP tools and the CLI alike (CMD-518). Work in another
+ * repository moves the session only after the board confirmed this key may report there (GET /plugin/config: the
+ * project exists, is not archived, and the key's person and scope reach it). A status needs a board that takes activity.
+ * Returns { error } when nothing was moved or sent, else what report returns.
+ */
+export async function explicitReport(sessionId, rep, cwd, runtime = runtimeOf()) {
+  const problem = reportProblem(rep);
+  if (problem) return { error: problem };
+  const existing = loadSession(sessionId);
+  const move = movesRepo(existing, cwd);
+  if (move) {
+    const cfg = await stagesFor(cwd);
+    if (cfg.from !== "board" || !cfg.lanes) return { error: "This session reports to another project, and the board did not confirm " + (cfg.repo ?? "this folder") + " for this machine" + (cfg.reason ? " (" + cfg.reason + ")" : "") + ". Nothing was moved." };
+  }
+  if (rep.type === "activity") {
+    const where = cwd ?? existing?.cwd;
+    if (!supportsActivity(where)) await stagesFor(where);
+    if (!supportsActivity(where)) return { error: "This board does not support activity reports yet. Update the board first; no status was sent." };
+  }
+  try {
+    return report(sessionId, rep, runtime, cwd, { move });
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 
 const real = (path) => {
   try {
