@@ -181,7 +181,9 @@ function sendActivity(s, ctx, out, at, beat = true) {
 /** A usage.reported the sender fills in from the transcript, so a hook never reads big files. */
 const usageMarker = (s, stage, at) => ({
   ...event(s, "usage.reported", { stage: stage ?? undefined }, at),
-  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt, ...(s.reported && { reported: s.reported }) },
+  // until: the snapshot is as of now, however late the flush reads the transcript (CMD-518: after a move, the old run's
+  // last usage must not take in the new project's work).
+  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt, until: new Date(at).toISOString(), ...(s.reported && { reported: s.reported }) },
 });
 
 function startFields(s, ctx, claim) {

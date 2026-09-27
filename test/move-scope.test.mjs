@@ -277,3 +277,95 @@ test("Boss: a raw snag, gate or finish from another repo's folder never moves th
   assert.ok(sent.every((e) => e.runId === before.runId && e.repo === "acme/a7"));
   assert.ok(!realpathSync(loadSession(sid).cwd).startsWith(realpathSync(plain)), "a plain folder does not pin the session");
 });
+test("Boss: A, B, A, B: every visit is its own run, never reopened, each with its own usage window", async () => {
+  const a = repo("a8");
+  const b = repo("b8");
+  boards["acme/a8"] = { status: 200 };
+  boards["acme/b8"] = { status: 200 };
+  const sid = "reentry";
+  const first = (await start(sid, a)).runId;
+  const i = queued().length;
+  const ids = [first];
+  for (const [dir, t] of [[b, "ABC-11"], [a, "ABC-12"], [b, "ABC-13"]]) {
+    assert.equal((await explicitReport(sid, { type: "stage", stage: "agent:S2", ticket: t }, dir)).error, undefined);
+    ids.push(loadSession(sid).runId);
+  }
+  assert.equal(new Set(ids).size, 4, "four visits, four runs: " + ids.join(", "));
+  const events = since(i);
+  for (const id of ids.slice(0, 3)) {
+    const mine = events.filter((e) => e.runId === id);
+    const done = mine.findIndex((e) => e.type === "run.finished");
+    assert.ok(done >= 0, "each earlier visit is finished");
+    assert.equal(mine.filter((e) => e.type === "run.finished").length, 1, "finished once");
+    assert.ok(mine.slice(done + 1).every((e) => e.type !== "run.started" && e.type !== "step.entered"), "never reopened");
+  }
+  // One usage baseline per visit, never reset; each visit starts counting after the one before stopped: nothing twice, nothing lost.
+  const markers = ids.map((id) => events.filter((e) => e.runId === id && e._usage));
+  for (let k = 0; k < 3; k++) {
+    assert.ok(markers[k].length, "visit " + (k + 1) + " reports its usage");
+    assert.equal(new Set(markers[k].map((e) => e._usage.since)).size, 1, "visit " + (k + 1) + ": one baseline");
+  }
+  for (let k = 1; k < 3; k++) {
+    const end = Date.parse(markers[k - 1].at(-1)._usage.until);
+    const begin = Date.parse(markers[k][0]._usage.since);
+    assert.ok(begin > end, "visit " + (k + 1) + " starts after visit " + k + " stopped");
+    assert.ok(begin - end < 5_000, "and right after it: no gap left uncounted");
+  }
+});
+
+test("Boss: a late flush of the old project's last usage stops at the switch, and none of B's work is counted in A", async () => {
+  const { writeFileSync, appendFileSync, mkdirSync } = await import("node:fs");
+  const a = repo("a9");
+  const b = repo("b9");
+  boards["acme/a9"] = { status: 200 };
+  boards["acme/b9"] = { status: 200 };
+  const codexHome = mkdtempSync(join(tmpdir(), "pipexp-codexhome-"));
+  const dir = join(codexHome, "sessions", "2026", "09", "27");
+  mkdirSync(dir, { recursive: true });
+  const sid = "01a0e5a1-0000-7000-8000-00000000a9a9";
+  const transcript = join(dir, "rollout-2026-09-27T21-00-00-" + sid + ".jsonl");
+  const at = (ms) => new Date(ms).toISOString();
+  const tokens = (ms, input, output) => JSON.stringify({ timestamp: at(ms), type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0 } } } });
+  const t0 = Date.now();
+  writeFileSync(transcript, [
+    JSON.stringify({ timestamp: at(t0 - 10 * 60_000), type: "session_meta", payload: { id: sid, cli_version: "0.155.1" } }),
+    JSON.stringify({ timestamp: at(t0 - 9 * 60_000), type: "turn_context", payload: { model: "gpt-5", effort: "high" } }),
+    tokens(t0 - 5 * 60_000, 1000, 100),
+  ].join("\n") + "\n");
+  process.env.CODEX_HOME = codexHome;
+  await stagesFor(a);
+  hook({ session_id: sid, cwd: a, transcript_path: transcript, hook_event_name: "UserPromptSubmit", turn_id: "t1" });
+  await explicitReport(sid, { type: "stage", stage: "agent:S2", ticket: "ABC-20" }, a);
+  const oldRun = loadSession(sid).runId;
+  await new Promise((r) => setTimeout(r, 20));
+  const i = queued().length;
+  assert.equal((await explicitReport(sid, { type: "stage", stage: "agent:S2", ticket: "ABC-21" }, b)).error, undefined);
+  const newRun = loadSession(sid).runId;
+  const lastA = since(i).filter((e) => e.runId === oldRun && e._usage).at(-1);
+  assert.ok(lastA, "the old run's last usage is queued");
+  // Work goes on in B before the flush comes round: 4,000 more input and 400 more output.
+  appendFileSync(transcript, tokens(Date.now() + 60_000, 5000, 500) + "\n");
+  hook({ session_id: sid, cwd: a, transcript_path: transcript, hook_event_name: "Stop", turn_id: "t1" });
+  const lastB = queued().filter((e) => e.runId === newRun && e._usage).at(-1);
+  const got = [];
+  const server2 = createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => { got.push(JSON.parse(body)); res.writeHead(201); res.end("{}"); });
+  });
+  await new Promise((r) => server2.listen(0, "127.0.0.1", r));
+  try {
+    const { sendOne } = await import("../bin/flush.mjs");
+    const creds = { url: "http://127.0.0.1:" + server2.address().port, key: "k".repeat(30) };
+    assert.equal(await sendOne(creds, lastA), "sent");
+    // B's first usage may come before B's own tokens exist in its window; send it only when it has something.
+    if (lastB) await sendOne(creds, lastB);
+  } finally {
+    await new Promise((r) => server2.close(r));
+    delete process.env.CODEX_HOME;
+  }
+  const sentA = got.find((e) => e.runId === oldRun);
+  assert.deepEqual({ input: sentA.agents[0].tokens.input, output: sentA.agents[0].tokens.output }, { input: 1000, output: 100 }, "A's usage stops at the switch");
+  const sentB = got.find((e) => e.runId === newRun);
+  if (sentB) assert.deepEqual({ input: sentB.agents[0].tokens.input, output: sentB.agents[0].tokens.output }, { input: 4000, output: 400 }, "B counts only its own work");
+});

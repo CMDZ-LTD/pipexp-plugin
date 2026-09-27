@@ -176,14 +176,24 @@ function moveScope(old, cwd) {
     commit(done.state, done.events);
   }
   const repo = repoOf(cwd).toLowerCase();
+  // Every visit to a repo is its own run (CMD-518): A, B, A, B is four runs, so a finished visit is never reopened and
+  // each keeps its own usage window. The session's first repo counts as its first visit.
+  const visits = { ...old.visits };
+  const from = repoOf(old.cwd)?.toLowerCase();
+  if (from) visits[from] = Math.max(1, visits[from] ?? 0);
+  const visit = (visits[repo] ?? 0) + 1;
+  visits[repo] = visit;
+  const scope = repo + (visit > 1 ? "/visit/" + visit : "");
   const s = newState({ session_id: old.sessionId, cwd, transcript_path: old.transcriptPath }, context(old.runtime, old.transcriptPath, old.runtimeVersion, ctx.now, cwd));
-  s.runId = uuid5("pipexp/session/" + old.sessionId + "/repo/" + repo);
+  s.runId = uuid5("pipexp/session/" + old.sessionId + "/repo/" + scope);
   s.runs = { agent: s.runId };
-  // Tokens from here on belong to the new run; the old run's usage went with its finish.
-  s.startedAt = new Date(ctx.now).toISOString();
+  // Tokens after the switch belong to the new run. The old run's last usage stops at ctx.now (its until), so the new
+  // one starts 1 ms later: a line logged at the switch is counted once, in the old run.
+  s.startedAt = new Date(ctx.now + 1).toISOString();
   s.reportingCwd = cwd;
-  // Lane runs started from here are named after this repo too (session.mjs onReport), never reusing another project's id.
-  s.scope = repo;
+  // Lane runs started from here are named after this repo visit too (session.mjs onReport), never reusing another id.
+  s.scope = scope;
+  s.visits = visits;
   for (const k of ["runtimeVersion", "owner", "turns", "interrupts", "inTurn", "turnId", "activity"]) if (old[k] !== undefined) s[k] = old[k];
   if (old.pastTurns) s.pastTurns = old.pastTurns;
   return s;
