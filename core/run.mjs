@@ -11,7 +11,7 @@ import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport } from "./session.mjs";
-import { boardContent, routedRepo } from "./stages.mjs";
+import { boardContent, routedRepo, startContext } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 import { restartPlan, startRestart } from "./restart.mjs";
 
@@ -72,10 +72,12 @@ function commit(state, events) {
 }
 
 /** Starts a flush in its own process group, so it outlives a hook the harness kills. steerFor: also check that session's steers. */
-export function kick(steerFor) {
+export function kick(steerFor, stagesCwd) {
   if (process.env.PIPEXP_NO_FLUSH) return;
+  // stagesCwd: also refresh that folder's lanes from the board (CMD-421), so the next session is told them.
+  const env = { ...process.env, ...(steerFor && { PIPEXP_STEER_SESSION: steerFor }), ...(stagesCwd && { PIPEXP_STAGES_CWD: stagesCwd }) };
   try {
-    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env: steerFor ? { ...process.env, PIPEXP_STEER_SESSION: steerFor } : process.env }).unref();
+    spawn(process.execPath, [FLUSH], { detached: true, stdio: "ignore", env }).unref();
   } catch {
     // The next hook tries again.
   }
@@ -126,7 +128,9 @@ export function hook(input, runtime = runtimeOf()) {
   // A live session asks the board for steers every CHECK_MS, through the detached flush, never in this hook.
   const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
   if (steer) markChecked(steer);
-  if ((events.length || steer) && credentials()) kick(steer ?? undefined);
+  // A session starting where the cached lanes are old or missing: the flush reads them again (CMD-421).
+  const stagesCwd = input.hook_event_name === "SessionStart" && input.cwd && startContext(input.cwd).stale ? input.cwd : null;
+  if ((events.length || steer || stagesCwd) && credentials()) kick(steer ?? undefined, stagesCwd ?? undefined);
   prune();
   return events;
 }
