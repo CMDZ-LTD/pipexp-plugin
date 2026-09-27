@@ -12,7 +12,7 @@ import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
-import { boardContent, routedRepo, startContext } from "./stages.mjs";
+import { boardContent, repoOf, routedRepo, startContext } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 import { restartPlan, startRestart } from "./restart.mjs";
 
@@ -67,8 +67,12 @@ function commit(state, events) {
   mkdirSync(sessions(), { recursive: true, mode: 0o700 });
   // Rechecked until known: the board learns the repo the first time pipexp_stages (or pipexp stages) reads it.
   if (!state.repo && state.cwd) state.repo = routedRepo(state.cwd);
+  // Where the session runs (CMD-374): "repo" in a GitHub checkout, "none" elsewhere. The board never files an event
+  // that says so on the key's own project, so a session outside every project's repo stays off every board.
+  if (!state.origin && state.cwd) state.origin = repoOf(state.cwd) ? "repo" : "none";
   writeJson(sessionFile(state.sessionId), state);
-  if (events.length) enqueue(...events.map((e) => scrubEvent(state.repo && !e.repo ? { ...e, repo: state.repo } : e)));
+  const where = (e) => ({ ...e, ...(state.repo && !e.repo && { repo: state.repo }), ...(state.origin && !e.origin && { origin: state.origin }) });
+  if (events.length) enqueue(...events.map((e) => scrubEvent(where(e))));
   return events;
 }
 
