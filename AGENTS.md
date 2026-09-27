@@ -34,6 +34,7 @@ Codex first, Claude Code next, then other harnesses. Changes land through a pull
 ## Test
 
 - `npm test`. Tests run with a temp `PIPEXP_HOME` and a fake board on localhost; the sender refuses any other host under test.
+- CI first runs `node scripts/secret-scan.mjs` (CMD-471, the board's CMD-469 scan): a private key, GitHub token, reporting key, Stripe or Resend live key, or long random value named like a key fails it, printed as file, line and rule only. Turn it on before each commit with `git config core.hooksPath scripts/hooks`. A test fake: build it at run time (`test/secret-scan.test.mjs`); only if it can't be, list the file in `scripts/secret-scan-allow.txt`. Keep the scanner byte-identical with the board's `scripts/secret-scan.mjs`.
 - End to end against a dev board: set `PIPEXP_URL` and `PIPEXP_KEY` (read from `~/.config/pipexp/dev-credentials.json`,
   never print the key), pipe hook JSON into `node hooks/pipexp-hook.mjs`, then `node bin/flush.mjs`.
 - Gotcha: real Codex transcripts are 5 to 25 MB. Hooks never read them; only the flusher does, and `usage.mjs` reads

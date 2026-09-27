@@ -1,0 +1,3 @@
+#!/bin/sh
+# CMD-469: refuses a commit that stages a key-shaped string. Turn it on once per clone: git config core.hooksPath scripts/hooks
+exec node scripts/secret-scan.mjs --staged
