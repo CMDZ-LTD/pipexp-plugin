@@ -2,6 +2,11 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A session learns its branch's PR, so its run links to the merge it produced, with no gh pr create needed (CMD-427). The detached flush asks gh (never a hook, at most every ten minutes, at once after a push, never for main), and the PR rides on the run's next step. A session that ended first sends its finish again with the PR. The board takes prNumber on step.entered since #441.
+- Each run counts the messages a person sent and how many came mid-turn (CMD-428). Counts only: the words are never read, kept or sent. The board shows them as Steering in the run drawer since #441.
+
 ## 0.1.15 (2026-09-27)
 
 - A question can name who it waits on: `pipexp_ask_human` takes `recipient` and `pipexp ask` takes `--recipient`, a GitHub login (a leading @ is dropped). The board keeps such a question open a day by default, and after 4 working hours unanswered its standup shows the asker Blocked, waiting on that person (CMD-230, board #406). A login the board would refuse is refused here, before anything is asked. Minimal content sends no recipient. Without a timeout, the board now picks how long a question stays open (an hour, as before, when it names nobody).
@@ -23,9 +28,6 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 ## 0.1.12 (2026-09-26)
 
 - Restart on another model from the board (CMD-80), off until this machine's owner runs `pipexp allow restart` (`pipexp deny restart` turns it off; `pipexp status` says which). Only the owner of this machine's key can ask. The run's turn ends, and a new run starts on the same ticket and a listed model, in the same folder and the same sandbox or permission mode (refused if that cannot be read), from a fixed prompt and an args list with no shell. It links back with parentRunId, and the old run's card logs it.
-
-- A session learns its branch's PR, so its run links to the merge it produced, with no gh pr create needed (CMD-427). The detached flush asks gh (never a hook, at most every ten minutes, at once after a push, never for main), and the PR rides on the run's next step. A session that ended first sends its finish again with the PR. Needs the board to accept prNumber on step.entered.
-- Each run counts the messages a person sent and how many came mid-turn (CMD-428). Counts only: the words are never read, kept or sent. Needs the board to accept humanTurns and interrupts in counters.
 
 ## 0.1.11 (2026-09-26)
 
