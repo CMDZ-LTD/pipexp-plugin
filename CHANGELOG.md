@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.16 (2026-09-27)
 
 - Sessions outside your project's repo stay off its board (CMD-374). Every event and question says where its session runs (`origin`: repo, or none for a folder with no GitHub remote). The board, since #442, no longer files such a session on your key's own project, so personal threads in other repos and scratch folders stop cluttering it. A repo with no project is no longer sent again without its repo, and its refusal is not reported as a fault. A board from before #442, which does not know origin, still gets every event and question: they go again without it.
 - Managers have their own lane (CMD-374). A session that reports `manager:Sx` waits in Managers at each turn's end and after two quiet hours, picks up its stage again at the next prompt, and never lands in a builder's Explore or Test.
