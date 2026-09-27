@@ -9,8 +9,8 @@ import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
 import { findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
-import { describe, stagesFor } from "../core/stages.mjs";
-import { SNAG_KINDS, snagFields } from "../core/session.mjs";
+import { describe, stagesFor, supportsActivity } from "../core/stages.mjs";
+import { ACTIVITY_STATES, SNAG_KINDS, snagFields } from "../core/session.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
 const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
@@ -23,6 +23,20 @@ const where = {
 };
 
 const TOOLS = [
+  {
+    name: "pipexp_report_status",
+    description: "Report what this session is doing without finishing its ticket. Use paused for a deliberate pause, blocked for an obstacle, waiting for a decision, idle for no work, or working to resume. Give a short reason for paused, blocked or waiting.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        state: { type: "string", enum: ACTIVITY_STATES },
+        note: { type: "string", maxLength: 300, description: "Current work or reason. No secrets or customer data." },
+        ticket: { type: "string", description: "Current tracker id, e.g. ABC-123." },
+        ...where,
+      },
+      required: ["state"],
+    },
+  },
   {
     name: "pipexp_report_stage",
     description: "Move this session's card on the PipeXP board to a stage. Use when a skill defines stages (e.g. ship:S4) or to correct a guessed one (agent:S1 Explore, agent:S2 Build, agent:S3 Test, agent:S4 Pull request).",
@@ -169,6 +183,17 @@ async function callTool(name, args = {}) {
   // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
   if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");
+  if (name === "pipexp_report_status") {
+    if (!ACTIVITY_STATES.includes(args.state)) return err("state must be working, idle, waiting, blocked or paused");
+    if (args.note !== undefined && (typeof args.note !== "string" || args.note.length > 300)) return err("note must be at most 300 characters");
+    if (["waiting", "blocked", "paused"].includes(args.state) && !args.note?.trim()) return err("Give a short note explaining this status");
+    const cwd = args.cwd ?? loadSession(id)?.cwd;
+    if (!supportsActivity(cwd)) await stagesFor(cwd);
+    if (!supportsActivity(cwd)) return err("This board does not support activity reports yet. Update the board first; no status was sent.");
+    const { state, events } = report(id, { type: "activity", state: args.state, note: args.note, ticket: args.ticket }, undefined, args.cwd);
+    if (!events.length && state.shipOwned) return err("This session is reported by the repo's ship scripts; no status was sent.");
+    return ok("Queued status: " + args.state + (state.ticket ? " for " + state.ticket : ""));
+  }
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");
     const { state, events } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd);

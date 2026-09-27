@@ -38,6 +38,7 @@ test("a plain Codex session: start, explore, build, test, PR, waiting, end", () 
   assert.deepEqual(brief(events), [
     "run.started",
     "step.entered agent:S1",
+    "activity.reported",
     "usage.reported agent:S1",
     "step.entered agent:S2",
     "usage.reported agent:S2",
@@ -101,14 +102,14 @@ test("a quick edit-test loop moves the card at most once a minute; a PR always m
   assert.deepEqual(brief(events).filter((e) => e.startsWith("step")), ["step.entered agent:S1", "step.entered agent:S2", "step.entered agent:S4"]);
 });
 
-test("a long test run re-sends its stage every 30 minutes, so the card never shows Stalled", () => {
+test("a long test run re-sends its stage every 30 minutes, so the card never shows Stalled; activity between goes as its own beat", () => {
   const { events } = play([
     [0, { hook_event_name: "UserPromptSubmit" }],
     [1, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npx playwright test" } }],
     [20, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "sleep 600" } }],
     [32, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "gh run watch" } }],
   ]);
-  assert.deepEqual(brief(events).slice(-2), ["step.entered agent:S3", "step.entered agent:S3"]);
+  assert.deepEqual(brief(events).slice(-2), ["activity.reported", "step.entered agent:S3"]);
 });
 
 test("the next prompt after the session was ended starts it again as a resume", () => {
@@ -156,7 +157,9 @@ test("a skill reporting ship stages moves the run into the ship lane, with its f
   assert.equal(started.skillTree, "0123456789abcdef");
   assert.equal(started.runId, start.state.runId, "the session's card becomes the ship card");
   const tool = onHook(r.state, { ...base, hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }, ctx(T0 + 5 * MIN));
-  assert.deepEqual(tool.events, []);
+  // No stage guessed: only the activity beat (4 minutes after the report said working).
+  assert.deepEqual(brief(tool.events), ["activity.reported"]);
+  assert.equal(tool.events[0].activity.state, "working");
   const next = onReport(tool.state, { type: "stage", stage: "ship:S4", fields: { counters: { reviewRound: 2 } } }, ctx(T0 + 9 * MIN));
   assert.deepEqual(brief(next.events), ["usage.reported ship:S1", "step.entered ship:S4"]);
   assert.deepEqual(next.events[1].counters, { humanTurns: 1, interrupts: 0, reviewRound: 2 });
@@ -319,7 +322,10 @@ test("CMD-370: after a finish, that turn's tool calls and its end leave the card
   const tool = onHook(done.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }, ctx(T0 + 2 * MIN + 144));
   assert.deepEqual(tool.events, [], "144 ms later: nothing");
   const stop = onHook(tool.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN));
-  assert.deepEqual(stop.events, []);
+  // CMD-518: the finished workflow stays Done; only the session's activity goes idle at the turn's end.
+  assert.deepEqual(brief(stop.events), ["activity.reported"]);
+  assert.equal(stop.events[0].activity.state, "idle");
+  assert.equal(stop.state.finished, true);
   const next = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 60 * MIN));
   assert.deepEqual(brief(next.events).slice(0, 1), ["run.started"]);
 });

@@ -98,6 +98,7 @@ test("a stop shown to an agent moves its card to Waiting for you; a ship run kee
   assert.equal(JSON.parse(run.stdout).continue, false);
   assert.equal(loadSession("s-4").stage, "agent:S5");
   assert.equal(loadSession("s-4").skill, "agent");
+  assert.equal(loadSession("s-4").activity?.state, "paused");
   // A ship run stopped the same way stays in its lane.
   const { report } = await import("../core/run.mjs");
   hook({ session_id: "s-5", cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
@@ -109,6 +110,7 @@ test("a stop shown to an agent moves its card to Waiting for you; a ship run kee
   assert.equal(JSON.parse(fire("s-5", "PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" } }).stdout).continue, false);
   assert.equal(loadSession("s-5").skill, "ship");
   assert.equal(loadSession("s-5").stage, "ship:S4");
+  assert.equal(loadSession("s-5").activity?.state, "paused");
 });
 
 test("review: a steer the board sends again (its reply was lost) is shown once, and the next call acknowledges it", async () => {

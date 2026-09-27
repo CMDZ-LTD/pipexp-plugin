@@ -16,7 +16,14 @@
     "machineId": "7d2f0a9b-1c3e-4f5a-8b6d-9e0f1a2b3c4d",
     "claim": "new",
     "tokensReported": false,
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "working",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    },
+    "prNumber": null
   },
   "run.started (no ticket)": {
     "type": "run.started",
@@ -35,7 +42,14 @@
     "claim": "new",
     "tokensReported": false,
     "ticket": null,
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "working",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    },
+    "prNumber": null
   },
   "step.entered": {
     "type": "step.entered",
@@ -50,7 +64,13 @@
       "humanTurns": 3,
       "interrupts": 1
     },
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "working",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    }
   },
   "usage.reported": {
     "type": "usage.reported",
@@ -78,7 +98,13 @@
         "runtimeVersion": "codex 0.155.1"
       }
     ],
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "working",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    }
   },
   "snag.reported": {
     "type": "snag.reported",
@@ -92,7 +118,13 @@
     "theme": "tests",
     "what": "Flaky test",
     "costMin": null,
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "working",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    }
   },
   "run.finished": {
     "type": "run.finished",
@@ -103,7 +135,13 @@
     "runtime": "codex",
     "outcome": "ready",
     "prNumber": null,
-    "origin": "repo"
+    "origin": "repo",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "idle",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "hook"
+    }
   },
   "machine.audit": {
     "type": "machine.audit",
@@ -139,6 +177,22 @@
       "Remove"
     ],
     "recipient": "ben-orbit",
+    "origin": "repo"
+  },
+  "activity.reported": {
+    "type": "activity.reported",
+    "eventId": "77777777-7777-4777-8777-777777777777",
+    "runId": "0b5c7c1e-4a8e-4d3a-9c55-2f1e6a7b8c90",
+    "occurredAt": "2026-09-25T10:00:00.000Z",
+    "skill": "agent",
+    "runtime": "codex",
+    "sessionId": "thread-1",
+    "activity": {
+      "state": "paused",
+      "observedAt": "2026-09-25T10:00:00.000Z",
+      "source": "agent",
+      "note": "Review pending"
+    },
     "origin": "repo"
   }
 }

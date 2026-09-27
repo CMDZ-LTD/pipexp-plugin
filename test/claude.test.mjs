@@ -41,7 +41,7 @@ test("a Claude Code session moves across the same lanes as Codex, as runtime cla
     [30, { hook_event_name: "SessionEnd", reason: "prompt_input_exit" }],
   ]);
   assert.deepEqual(brief(events), [
-    "run.started", "step.entered agent:S1", "usage.reported agent:S1", "step.entered agent:S2",
+    "run.started", "step.entered agent:S1", "activity.reported", "usage.reported agent:S1", "step.entered agent:S2",
     "usage.reported agent:S2", "step.entered agent:S3", "usage.reported agent:S3", "step.entered agent:S5", "run.finished",
   ]);
   assert.ok(events.every((e) => e.runtime === "claude"));

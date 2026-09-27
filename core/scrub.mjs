@@ -39,6 +39,7 @@ export const LIMITS = { theme: 60, what: 500, title: 200, branch: 200, owner: 80
 /** The event with every free-text field redacted and cut; empty text becomes null (the board refuses "" ). */
 export function scrubEvent(event) {
   const out = { ...event };
+  if (out.activity?.note) out.activity = { ...out.activity, note: scrub(out.activity.note).slice(0, 300) };
   for (const [key, max] of Object.entries(LIMITS)) {
     if (!(key in out)) continue;
     const value = out[key];
