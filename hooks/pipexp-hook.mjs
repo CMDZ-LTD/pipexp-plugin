@@ -41,7 +41,10 @@ process.stdin.on("end", () => {
         out = steerOutput(runtime, input.hook_event_name, stages ? [{ kind: "note", message: stages }, ...steers] : steers);
         // Stopped: the card leaves its working stage for Waiting for you; who stopped it and why is on its timeline.
         // Only an agent-lane card: a skill run (ship and the rest) keeps its lane and stage; its timeline has the stop.
-        if (out && hasStop(steers) && loadSession(input.session_id)?.skill === "agent") report(input.session_id, { type: "stage", stage: "agent:S5" }, runtime, input.cwd);
+        if (hasStop(steers)) {
+          if (loadSession(input.session_id)?.skill === "agent") report(input.session_id, { type: "stage", stage: "agent:S5" }, runtime);
+          report(input.session_id, { type: "activity", state: "paused", source: "hook", note: steers.find((s) => s.kind === "stop" || s.kind === "restart")?.message ?? "Stopped from the board" }, runtime);
+        }
       }
     }
   } catch {

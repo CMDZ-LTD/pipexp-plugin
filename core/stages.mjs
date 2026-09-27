@@ -48,7 +48,8 @@ export async function stagesFor(cwd) {
     if (lanes) {
       // The project's content level (CMD-343): minimal on the board beats standard here.
       const contentLevel = res.body.contentLevel === "minimal" ? "minimal" : "standard";
-      writeJson(cacheFile(repo), { lanes, contentLevel, at: new Date().toISOString() });
+      const capabilities = Array.isArray(res.body.capabilities) ? res.body.capabilities.filter((c) => typeof c === "string") : [];
+      writeJson(cacheFile(repo), { lanes, contentLevel, capabilities, at: new Date().toISOString() });
       if (repo && refused(repo)) writeJson(refusedFile(), { ...readJson(refusedFile()), [repo]: undefined });
       return { repo, lanes, from: "board" };
     }
@@ -87,6 +88,8 @@ export function boardContent(cwd) {
   const level = readJson(cacheFile(repoOf(cwd)))?.contentLevel;
   return level === "minimal" || level === "standard" ? level : null;
 }
+
+export const supportsActivity = (cwd) => readJson(cacheFile(repoOf(cwd)))?.capabilities?.includes("agent-activity-v1") === true;
 
 /** One line per lane, for a person or an agent: "ship (Ship): ship:S0 Check the tools, ship:S8 Review [waits on a person]". */
 export const describe = (lanes) =>

@@ -5,9 +5,8 @@ description: Report this coding session to the PipeXP board. Use when a skill or
 
 # PipeXP
 
-The PipeXP plugin already reports every session by itself: it starts a card when you start, moves it
-between Explore, Build, Test and Pull request from your tool calls, and marks it "Waiting for you" when
-your turn ends. Do nothing for that. Use the tools below only to add what hooks cannot see.
+The PipeXP plugin reports activity from hooks: working during a turn, idle when the turn ends.
+Activity is separate from the workflow stage and ticket completion. Use the tools below for what hooks cannot see.
 
 ## Tools
 
@@ -15,6 +14,7 @@ your turn ends. Do nothing for that. Use the tools below only to add what hooks 
 |---|---|
 | `pipexp_stages` | Once, at the start of a session where you run a skill with stages: it lists this repo's lanes and stage ids as the board has them (each project sets its own). |
 | `pipexp_report_stage` | A skill you are running has stages: report each one on entry, using an id `pipexp_stages` listed (e.g. ship:S4). Also when the work is for a ticket (pass `ticket`, e.g. ABC-123). |
+| `pipexp_report_status` | Report `paused`, `blocked` or `waiting` with a short reason; `working` to resume, or `idle` when no work is running. Pass the current ticket when it changes. A status report never marks the ticket done. Requires a board with activity reporting support. |
 | `pipexp_report_snag` | Something cost real time: a flaky test, a wrong doc, a missing tool. One or two sentences. |
 | `pipexp_ask_human` | You need a decision only a person can make. It waits on the board. If you know it waits on someone other than the person you work for, pass their GitHub login as `recipient`. If it returns `waiting`, call it again with the `question_id`. If it fails, ask in the chat. |
 | `pipexp_finish` | The work is done (`ready` with the PR number, `merged`), `blocked` on a person (say what in `question`), or `abandoned`. |

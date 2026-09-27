@@ -12,7 +12,7 @@ import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
 import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
-import { boardContent, repoOf, routedRepo, startContext } from "./stages.mjs";
+import { boardContent, repoOf, routedRepo, startContext, supportsActivity } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 import { restartPlan, startRestart } from "./restart.mjs";
 
@@ -71,8 +71,19 @@ function commit(state, events) {
   // that says so on the key's own project, so a session outside every project's repo stays off every board.
   if (!state.origin && state.cwd) state.origin = repoOf(state.cwd) ? "repo" : "none";
   writeJson(sessionFile(state.sessionId), state);
-  const where = (e) => ({ ...e, ...(state.repo && !e.repo && { repo: state.repo }), ...(state.origin && !e.origin && { origin: state.origin }) });
-  if (events.length) enqueue(...events.map((e) => scrubEvent(where(e))));
+  const enabled = supportsActivity(state.cwd);
+  const minimal = contentFor(state.cwd) === "minimal";
+  const where = (e) => {
+    const out = { ...e, ...(state.repo && !e.repo && { repo: state.repo }), ...(state.origin && !e.origin && { origin: state.origin }) };
+    if (minimal && out.activity) { const { note, ...activity } = out.activity; out.activity = activity; }
+    if (!enabled) {
+      delete out.sessionId;
+      delete out.activity;
+      if (out.type === "run.started") delete out.prNumber;
+    }
+    return out;
+  };
+  if (events.length) enqueue(...events.filter((e) => enabled || e.type !== "activity.reported").map((e) => scrubEvent(where(e))));
   return events;
 }
 
@@ -151,12 +162,17 @@ export function hook(input, runtime = runtimeOf()) {
 }
 
 /** An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. */
-export function report(sessionId, rep, runtime = runtimeOf(), cwd = process.cwd()) {
+export function report(sessionId, rep, runtime = runtimeOf(), cwd) {
   const { state, events } = withSessionLock(sessionId, () => {
     const existing = loadSession(sessionId);
-    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), existing?.cwd ?? cwd);
+    const folder = cwd ?? existing?.cwd ?? process.cwd();
+    if (existing && cwd && repoOf(existing.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase()) {
+      throw new Error("This session belongs to another repository. Start a session in the new project instead.");
+    }
+    const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), folder);
     // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
-    const base = existing ?? onHook(null, { session_id: sessionId, cwd: cwd || process.cwd(), hook_event_name: "none" }, ctx).state;
+    const base = existing ?? onHook(null, { session_id: sessionId, cwd: folder, hook_event_name: "none" }, ctx).state;
+    if (cwd) { base.cwd = cwd; base.reportingCwd = cwd; }
     const result = onReport(base, rep, ctx);
     commit(result.state, result.events);
     return result;

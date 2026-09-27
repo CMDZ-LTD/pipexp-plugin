@@ -28,7 +28,12 @@ export function snagFields(f = {}) {
 }
 // A manager's own lane (CMD-374): a session that reports manager:Sx waits there, never in a builder's stage.
 export const MANAGER_WAITING = "manager:S4";
-const BEAT_MS = 30 * 60_000;
+const BEAT_MS = 60_000;
+export const ACTIVITY_STATES = ["working", "idle", "waiting", "blocked", "paused"];
+const held = (s) => ["waiting", "blocked", "paused"].includes(s.activity?.state) || (s.activity?.source === "agent" && s.activity.state === "idle");
+const activity = (s, state, at, source = "hook", note) => {
+  s.activity = { state, observedAt: new Date(at).toISOString(), source, ...(note && { note }) };
+};
 // A tool call may move the card at most once a minute, so a fix-test loop does not flood the board.
 const DWELL_MS = 60_000;
 const FAILS_FOR_SNAG = 3;
@@ -122,7 +127,8 @@ export function newState(input, ctx) {
 
 /** A fresh id per event. The outbox keeps it, so every resend of a queued event carries the same id. */
 function event(s, type, fields, at) {
-  const out = { eventId: randomUUID(), runId: s.runId, occurredAt: new Date(at).toISOString(), skill: s.skill, runtime: s.runtime, type };
+  const out = { eventId: randomUUID(), runId: s.runId, occurredAt: new Date(at).toISOString(), skill: s.skill, runtime: s.runtime, type,
+    sessionId: s.sessionId, ...(s.activity && { activity: s.activity }) };
   if (s.ticket) out.ticket = s.ticket;
   if (s.attemptId) out.attemptId = s.attemptId;
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) out[k] = v;
@@ -152,6 +158,7 @@ function startFields(s, ctx, claim) {
     // The card had a ticket and this branch has none: null drops it on the board (CMD-452, board #344). Left out, the
     // board would keep the old one; a session that never had a ticket sends none, so an older board is never refused.
     ...(!s.ticket && s.ticketDropped && { ticket: null }),
+    ...(s.prDropped && { prNumber: null }),
   };
 }
 
@@ -169,6 +176,8 @@ function refresh(s, ctx) {
       if (had && !s.ticket) s.ticketDropped = true;
       s.ticketReported = s.ticketReported && !ticketOf(git.branch);
       s.prNumber = null;
+      s.prDropped = true;
+      s.ignorePrBranch = null;
     }
     s.gitBranch = git.branch;
   }
@@ -231,7 +240,7 @@ export function onHook(state, input, ctx) {
   // PrFound comes from the flush, not the agent: it says nothing about whether the session is still going.
   if (name !== "PrFound") s.lastSeenAt = at;
   if (input.transcript_path) s.transcriptPath = input.transcript_path;
-  if (input.cwd) s.cwd = input.cwd;
+  if (input.cwd) s.cwd = s.reportingCwd ?? input.cwd;
   // An agent with no transcript (OpenCode) sends its own running token total with its hooks.
   if (input.pipexp_usage && typeof input.pipexp_usage === "object") s.reported = { ...input.pipexp_usage, startedAt: s.startedAt };
   // Claude Code writes its version into the transcript after the first prompt, so SessionStart may not see it yet.
@@ -241,9 +250,9 @@ export function onHook(state, input, ctx) {
   s.runtimeVersion = version;
   const out = [];
   // The PR the flush found for this branch (core/pr.mjs): the card links to it from its next step.
-  const known = s.gitBranch ? ctx.probe.pr?.(s.sessionId, s.gitBranch) : null;
+  const known = s.gitBranch && s.ignorePrBranch !== s.gitBranch ? ctx.probe.pr?.(s.sessionId, s.gitBranch) : null;
   const learnedPr = !!known && known !== s.prNumber;
-  if (learnedPr) s.prNumber = known;
+  if (learnedPr) { s.prNumber = known; s.prDropped = false; }
 
   // Until a ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
   // Checked at turn edges and when a tool call runs ship's claim script, so other tool calls never pay for it.
@@ -258,6 +267,7 @@ export function onHook(state, input, ctx) {
 
   if (name === "SessionStart") {
     if (input.source === "compact" && s.started && !s.finished) return { state: s, events: [] };
+    if (!s.activity) activity(s, "idle", at);
     start(s, ctx, s.started ? "resume" : "new", out);
     if (!s.stage) enter(s, STAGES.explore, at, out);
   } else if (name === "UserPromptSubmit") {
@@ -266,23 +276,26 @@ export function onHook(state, input, ctx) {
     s.turns = (s.turns ?? 0) + 1;
     if (s.inTurn) s.interrupts = (s.interrupts ?? 0) + 1;
     s.inTurn = true;
+    activity(s, "working", at);
     revive(s, ctx, out);
     if (was && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
     // A manager back from waiting picks up the stage it was in (CMD-374).
     else if (s.skill === "manager" && s.stage === MANAGER_WAITING) enter(s, s.managerStage ?? "manager:S1", at, out);
+    if (!out.length) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
     // Done (CMD-370: a finish was undone 144 ms later). The next prompt, or an explicit report, brings it back.
     if (s.finished) return { state: s, events: [] };
+    if (!held(s)) activity(s, "working", at);
     revive(s, ctx, out);
     const cmd = commandOf(input.tool_input);
     // Claude Code sends a failed tool call as its own event (PostToolUseFailure, with "error"), Codex inside the response.
     const didFail = name === "PostToolUseFailure" || failed(input.tool_response);
     const pushed = PR_CMD.test(cmd) && !didFail;
     const pr = pushed ? prFrom(input.tool_response) : null;
-    if (pr) s.prNumber = pr;
+    if (pr) { s.prNumber = pr; s.prDropped = false; s.ignorePrBranch = null; }
     if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     // A push or PR that failed (no remote, no auth) leaves the card where it was.
     const guess = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
@@ -303,6 +316,7 @@ export function onHook(state, input, ctx) {
     // The turn that finished the card ends: nothing to add.
     s.inTurn = false;
     if (s.finished) return { state: s, events: [] };
+    if (!held(s)) activity(s, "idle", at);
     revive(s, ctx, out);
     if (refresh(s, ctx) || learnedVersion) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     if (!s.explicit) enter(s, STAGES.waiting, at, out);
@@ -311,8 +325,10 @@ export function onHook(state, input, ctx) {
       enter(s, MANAGER_WAITING, at, out);
     }
     else out.push(usageMarker(s, s.stage, at));
+    if (!out.some((e) => e.type !== "usage.reported")) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "SessionEnd") {
     if (!s.started || s.finished) return { state: s, events: [] };
+    if (!held(s)) activity(s, "idle", at);
     // Waiting spends no tokens: Stop already reported the turn's usage.
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
     // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
@@ -350,10 +366,29 @@ export function onReport(state, report, ctx) {
     return { state: s, events: [] };
   }
   const fields = report.type === "snag.reported" ? snagFields(report.fields) : { ...(report.fields ?? {}) };
+  const metadataChanged = s.started && (report.type === "stage" || report.type === "activity") && refresh(s, ctx);
+  const changedTicket = !!report.ticket && report.ticket !== s.ticket;
   if (report.ticket) {
+    if (changedTicket) {
+      s.prNumber = null;
+      s.prDropped = true;
+      s.ignorePrBranch = s.gitBranch;
+    }
     s.ticket = report.ticket;
     s.ticketReported = true;
   }
+  if (report.type === "activity") {
+    if (!ACTIVITY_STATES.includes(report.state)) throw new Error("Unknown activity state");
+    if (["waiting", "blocked", "paused"].includes(report.state) && !words(report.note)) throw new Error("This status needs a reason");
+    activity(s, report.state, at, report.source === "hook" ? "hook" : "agent", ctx.content === "minimal" ? undefined : words(report.note));
+    // Status changes do not reopen a finished workflow or claim its ticket is complete.
+    if (!s.started || changedTicket) start(s, ctx, s.started ? "resume" : "new", out);
+    else if (metadataChanged) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    out.push(event(s, "activity.reported", {}, at));
+    return { state: s, events: out };
+  }
+  if (report.type === "stage" || report.type === "run.started") activity(s, "working", at, "agent");
+  if (report.type === "run.finished") activity(s, fields.outcome === "blocked" ? "blocked" : "idle", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
   if (report.type === "stage") {
     const skill = report.stage.split(":")[0];
     const moved = skill !== s.skill;
@@ -380,8 +415,8 @@ export function onReport(state, report, ctx) {
       if (skill !== "agent") s.fields = { ...(ctx.probe.skillInfo?.(s.cwd, skill) ?? {}), ...s.fields };
     }
     s.explicit = true;
-    if (moved || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
-    enter(s, report.stage, at, out, fields);
+    if (moved || metadataChanged || changedTicket || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
+    enter(s, report.stage, at, out, fields, true);
   } else if (report.type === "run.started") {
     Object.assign(s.fields, fields);
     start(s, ctx, fields.claim ?? (s.started ? "resume" : "new"), out);
