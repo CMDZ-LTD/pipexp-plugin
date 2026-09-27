@@ -10,6 +10,7 @@ import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
 import { findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
+import { SNAG_KINDS, snagFields } from "../core/session.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
 const TICKET = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
@@ -41,7 +42,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        kind: { type: "string", enum: ["snag", "wrong-doc", "missing-script", "gate", "evidence", "worked"] },
+        kind: { type: "string", enum: SNAG_KINDS, description: "snag unless another fits" },
         theme: { type: "string", description: "A few words, e.g. flaky e2e" },
         what: { type: "string", description: "One or two sentences. No secrets, no customer data." },
         cost_min: { type: "number", description: "Minutes it cost, if known" },
@@ -175,8 +176,11 @@ async function callTool(name, args = {}) {
     return ok("On the board: " + state.stage + (state.ticket ? " for " + state.ticket : ""));
   }
   if (name === "pipexp_report_snag") {
-    report(id, { type: "snag.reported", fields: { kind: args.kind, theme: args.theme, what: args.what, costMin: typeof args.cost_min === "number" ? args.cost_min : null } }, undefined, args.cwd);
-    return ok("Snag recorded.");
+    // Codex does not hold agents to the enum or the required fields: snagFields makes whatever came a snag the board takes.
+    const fields = snagFields({ kind: args.kind, theme: args.theme, what: args.what, note: args.note, description: args.description, costMin: args.cost_min });
+    report(id, { type: "snag.reported", fields }, undefined, args.cwd);
+    const asked = typeof args.kind === "string" ? args.kind.trim() : "";
+    return ok("Snag recorded" + (asked && asked.toLowerCase() !== fields.kind ? " as kind snag (" + JSON.stringify(asked.slice(0, 40)) + " is not one of " + SNAG_KINDS.join(", ") + ")" : "") + ".");
   }
   if (name === "pipexp_finish") {
     const bad = finishProblem(args);
