@@ -42,18 +42,22 @@ function call(name, args, env = {}) {
   });
 }
 
-test("a report from another worktree of the same repo finds the one session there", async () => {
+test("a report from another worktree of the same repo lands on the session it names; with no name, nothing is picked", async () => {
   const { main, tree } = repoWithWorktree("shop");
   hook({ session_id: "s-main", cwd: main, hook_event_name: "UserPromptSubmit" });
   assert.deepEqual(findSession(tree, {}), { id: "s-main", via: "worktree" });
   // The thread id, when the process has one, names it outright.
   assert.deepEqual(findSession(tree, { CODEX_THREAD_ID: "thread-7" }), { id: "thread-7", via: "env" });
-  const r = await call("pipexp_report_stage", { cwd: tree, stage: "agent:S2", ticket: "ABC-12" });
+  // CMD-518: a report never picks a session by folder, even the only one there.
+  const none = await call("pipexp_report_stage", { cwd: tree, stage: "agent:S2", ticket: "ABC-12" });
+  assert.equal(none.isError, true);
+  assert.match(none.content[0].text, /Pass session_id.*Nothing was sent/);
+  const r = await call("pipexp_report_stage", { cwd: tree, session_id: "s-main", stage: "agent:S2", ticket: "ABC-12" });
   assert.equal(r.isError, undefined);
   assert.equal(r.content[0].text, "On the board: agent:S2 for ABC-12");
 });
 
-test("with two sessions in other worktrees it picks none, and the error names the folder and says pass session_id", async () => {
+test("with two sessions in other worktrees it picks none; a report says pass session_id; a harness-given thread id counts", async () => {
   const { main, tree } = repoWithWorktree("app");
   const other = tree + "-2";
   git(main, "worktree", "add", "-q", "-b", "other", other);
@@ -62,14 +66,11 @@ test("with two sessions in other worktrees it picks none, and the error names th
   assert.deepEqual(findSession(tree, {}), { id: null, why: "several" });
   const r = await call("pipexp_report_stage", { cwd: tree, stage: "agent:S2" });
   assert.equal(r.isError, true);
-  assert.match(r.content[0].text, new RegExp("^No PipeXP session found for " + tree.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ": several sessions"));
   assert.match(r.content[0].text, /Pass session_id/);
-  // A folder in no repo at all: named too.
   const lone = realpathSync(mkdtempSync(join(tmpdir(), "pipexp-lone-")));
   const r2 = await call("pipexp_report_stage", { cwd: lone, stage: "agent:S2" });
-  assert.match(r2.content[0].text, new RegExp("No PipeXP session found for " + lone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(r2.content[0].text, /Pass session_id/);
   // A Codex thread id in the server's own environment wins, from any folder.
   const r3 = await call("pipexp_report_stage", { cwd: lone, stage: "agent:S3" }, { CODEX_THREAD_ID: "thread-9" });
   assert.equal(r3.content[0].text, "On the board: agent:S3");
 });
-

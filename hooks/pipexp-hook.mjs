@@ -17,9 +17,10 @@ function stagesText(input, atStart) {
   if (process.env.PIPEXP_OFF || !input.cwd || loadSession(input.session_id)?.shipOwned) return "";
   const told = sessionFile(input.session_id) + ".told";
   if (!atStart && existsSync(told)) return "";
-  const { text } = startContext(input.cwd);
-  if (text) writeFileSync(told, "", { mode: 0o600 });
-  return text;
+  const { text, board } = startContext(input.cwd, Date.now(), input.session_id);
+  // "Told" means the board's part was told. The session id alone goes at every SessionStart, never at a prompt.
+  if (board) writeFileSync(told, "", { mode: 0o600 });
+  return atStart || board ? text : "";
 }
 
 process.stdout.on("error", () => process.exit(0));
