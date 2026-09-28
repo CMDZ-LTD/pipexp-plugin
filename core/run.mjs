@@ -10,9 +10,9 @@ import * as probe from "./probe.mjs";
 import { enqueue } from "./queue.mjs";
 import { queueAudit } from "./health.mjs";
 import { scrubEvent } from "./scrub.mjs";
-import { onHook, onIdle, onReport, PR_CMD, commandOf } from "./session.mjs";
+import { newState, onHook, onIdle, onReport, PR_CMD, commandOf, reportProblem, uuid5 } from "./session.mjs";
 import { markPrChecked, prDue } from "./pr.mjs";
-import { boardContent, repoOf, routedRepo, startContext, supportsActivity } from "./stages.mjs";
+import { boardContent, repoOf, routedRepo, stagesFor, startContext, supportsActivity } from "./stages.mjs";
 import { markChecked, steerDue } from "./steer.mjs";
 import { restartPlan, startRestart } from "./restart.mjs";
 
@@ -72,8 +72,14 @@ function commit(state, events) {
   // Where the session runs (CMD-374): "repo" in a GitHub checkout, "none" elsewhere. The board never files an event
   // that says so on the key's own project, so a session outside every project's repo stays off every board.
   if (!state.origin && state.cwd) state.origin = repoOf(state.cwd) ? "repo" : "none";
-  writeJson(sessionFile(state.sessionId), state);
   const enabled = supportsActivity(state.cwd);
+  // An observation this board cannot take is stripped below, so it is not marked sent: the first work once the board
+  // takes activity sends it at once (CMD-518, upgrading from 0.1.18).
+  if (!enabled) {
+    delete state.activitySent;
+    delete state.activitySentAt;
+  }
+  writeJson(sessionFile(state.sessionId), state);
   const minimal = contentFor(state.cwd) === "minimal";
   const where = (e) => {
     const out = { ...e, ...(state.repo && !e.repo && { repo: state.repo }), ...(state.origin && !e.origin && { origin: state.origin }) };
@@ -157,19 +163,89 @@ export function hook(input, runtime = runtimeOf()) {
   const steer = credentials() && steerDue(input.session_id) ? input.session_id : null;
   if (steer) markChecked(steer);
   // A session starting where the cached lanes are old or missing: the flush reads them again (CMD-421).
-  const stagesCwd = input.hook_event_name === "SessionStart" && input.cwd && startContext(input.cwd).stale ? input.cwd : null;
+  const stagesCwd = stagesDue(input);
   if ((events.length || steer || stagesCwd || prFor) && credentials()) kick(steer ?? undefined, stagesCwd ?? undefined, prFor ?? undefined);
   prune();
   return events;
 }
 
-/** An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. */
-export function report(sessionId, rep, runtime = runtimeOf(), cwd) {
+/**
+ * The folder whose lanes the flush should read again after this hook (CMD-421), or null: a session starting where the
+ * cached answer is old or missing, and any hook where it was written by 0.1.18 (no capabilities), so a long-lived thread
+ * learns at once that the board takes activity (CMD-518). Read once: the answer then has capabilities.
+ */
+export function stagesDue(input, now = Date.now()) {
+  if (!input?.cwd) return null;
+  const { stale, legacy } = startContext(input.cwd, now);
+  if (legacy) {
+    // R3 on #38: a board that refuses, errors or is out of reach leaves the old cache, so every tool call would read it
+    // again. The first hook after the upgrade reads at once; after any attempt, the next waits TRY_MS. Only when and how
+    // often is kept, never an answer or a key.
+    const key = repoOf(input.cwd) ?? "_default";
+    const tried = readJson(triedFile()) ?? {};
+    if (now - (tried[key]?.at ?? 0) < TRY_MS) return null;
+    try {
+      writeJson(triedFile(), { ...tried, [key]: { at: now, n: (tried[key]?.n ?? 0) + 1 } });
+    } catch {}
+    return input.cwd;
+  }
+  return input.hook_event_name === "SessionStart" && stale ? input.cwd : null;
+}
+const TRY_MS = 5 * 60_000;
+const triedFile = () => join(stateDir(), "stages", "_tried.json");
+
+/**
+ * A session that now works in another repository (CMD-518): the run it had ends where it is, in its own project, and
+ * the same session starts a new run for the new repo. The new run's id comes from the session and the repo, so no run
+ * ever moves between projects and the real session id is kept. Only after the board said this key may report there.
+ */
+function moveScope(old, cwd) {
+  const ctx = context(old.runtime, old.transcriptPath, old.runtimeVersion, Date.now(), old.cwd);
+  // Its events keep the old repo (commit names state.repo), so the finish lands on the old project's board.
+  if (old.started && !old.finished) {
+    const done = onReport(old, { type: "run.finished", fields: { outcome: "abandoned", prNumber: old.prNumber ?? null } }, ctx);
+    commit(done.state, done.events);
+  }
+  const repo = repoOf(cwd).toLowerCase();
+  // Every visit to a repo is its own run (CMD-518): A, B, A, B is four runs, so a finished visit is never reopened and
+  // each keeps its own usage window. The session's first repo counts as its first visit.
+  const visits = { ...old.visits };
+  const from = repoOf(old.cwd)?.toLowerCase();
+  if (from) visits[from] = Math.max(1, visits[from] ?? 0);
+  const visit = (visits[repo] ?? 0) + 1;
+  visits[repo] = visit;
+  const scope = repo + (visit > 1 ? "/visit/" + visit : "");
+  const s = newState({ session_id: old.sessionId, cwd, transcript_path: old.transcriptPath }, context(old.runtime, old.transcriptPath, old.runtimeVersion, ctx.now, cwd));
+  s.runId = uuid5("pipexp/session/" + old.sessionId + "/repo/" + scope);
+  s.runs = { agent: s.runId };
+  // Tokens after the switch belong to the new run. The old run's last usage stops at ctx.now (its until), so the new
+  // one starts 1 ms later: a line logged at the switch is counted once, in the old run.
+  s.startedAt = new Date(ctx.now + 1).toISOString();
+  s.reportingCwd = cwd;
+  // Lane runs started from here are named after this repo visit too (session.mjs onReport), never reusing another id.
+  s.scope = scope;
+  s.visits = visits;
+  for (const k of ["runtimeVersion", "owner", "turns", "interrupts", "inTurn", "turnId", "activity"]) if (old[k] !== undefined) s[k] = old[k];
+  if (old.pastTurns) s.pastTurns = old.pastTurns;
+  return s;
+}
+
+/**
+ * An explicit report for a session (MCP tool, CLI). Starts the session's run when needed. A cwd in another repository
+ * is refused unless move is set: the caller has checked the board takes this key's events for that repo.
+ */
+export function report(sessionId, rep, runtime = runtimeOf(), cwd, { move = false } = {}) {
   const { state, events } = withSessionLock(sessionId, () => {
-    const existing = loadSession(sessionId);
+    let existing = loadSession(sessionId);
+    // A folder that is no repository says nothing about the project: the session keeps its own (a script run from /tmp).
+    if (existing && cwd && !repoOf(cwd) && repoOf(existing.cwd)) cwd = undefined;
     const folder = cwd ?? existing?.cwd ?? process.cwd();
-    if (existing && cwd && repoOf(existing.cwd)?.toLowerCase() !== repoOf(cwd)?.toLowerCase()) {
-      throw new Error("This session belongs to another repository. Start a session in the new project instead.");
+    // Checked before anything moves or is sent: a report that cannot go never leaves half a move.
+    const problem = reportProblem(rep);
+    if (problem) throw new Error(problem);
+    if (movesRepo(existing, cwd)) {
+      if (!move || !SCOPE_TYPES.has(rep.type)) throw new Error(otherScope(existing, cwd));
+      existing = moveScope(existing, cwd);
     }
     const ctx = context(existing?.runtime ?? runtime, existing?.transcriptPath, existing?.runtimeVersion, Date.now(), folder);
     // No hook has seen this session yet (hooks not trusted, or a report before the first prompt): start it here.
@@ -181,6 +257,42 @@ export function report(sessionId, rep, runtime = runtimeOf(), cwd) {
   });
   if (credentials()) kick();
   return { state, events };
+}
+
+/** Whether a report from cwd names another repository than the session's. A folder that is no repository never does. */
+export const movesRepo = (session, cwd) => !!session && !!cwd && !!repoOf(cwd) && repoOf(session.cwd)?.toLowerCase() !== repoOf(cwd).toLowerCase();
+// Only these pick a session's project; a raw event (snag, gate, finish...) never moves it (CMD-518, the Boss).
+const SCOPE_TYPES = new Set(["stage", "activity"]);
+const otherScope = (session, cwd) =>
+  "This session reports to " + (repoOf(session.cwd) ?? "a folder with no repository") + ", and " + repoOf(cwd) + " is another project. Nothing was sent. " +
+  "Pick the scope first with pipexp stage or pipexp activity (pipexp_report_stage or pipexp_report_status), then send it again.";
+
+/**
+ * The one path for an explicit stage or status report, from the MCP tools and the CLI alike (CMD-518). Work in another
+ * repository moves the session only after the board confirmed this key may report there (GET /plugin/config: the
+ * project exists, is not archived, and the key's person and scope reach it). A status needs a board that takes activity.
+ * Returns { error } when nothing was moved or sent, else what report returns.
+ */
+export async function explicitReport(sessionId, rep, cwd, runtime = runtimeOf()) {
+  const problem = reportProblem(rep);
+  if (problem) return { error: problem };
+  const existing = loadSession(sessionId);
+  const move = movesRepo(existing, cwd);
+  if (move && !SCOPE_TYPES.has(rep.type)) return { error: otherScope(existing, cwd) };
+  if (move) {
+    const cfg = await stagesFor(cwd);
+    if (cfg.from !== "board" || !cfg.lanes) return { error: "This session reports to another project, and the board did not confirm " + (cfg.repo ?? "this folder") + " for this machine" + (cfg.reason ? " (" + cfg.reason + ")" : "") + ". Nothing was moved." };
+  }
+  if (rep.type === "activity") {
+    const where = cwd ?? existing?.cwd;
+    if (!supportsActivity(where)) await stagesFor(where);
+    if (!supportsActivity(where)) return { error: "This board does not support activity reports yet. Update the board first; no status was sent." };
+  }
+  try {
+    return report(sessionId, rep, runtime, cwd, { move });
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 const real = (path) => {

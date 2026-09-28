@@ -23,7 +23,7 @@ export async function sendOne(creds, event) {
   // Marks for the outbox only, never sent: _beat (a heartbeat it may merge), _usage (filled in below).
   const { _usage: u, _beat, ...rest } = event;
   if (!u) return post(creds, rest);
-  const agents = usage({ since: u.since, runtime: u.runtime, session: u.session, transcriptPath: u.transcriptPath, reported: u.reported });
+  const agents = usage({ since: u.since, until: u.until, runtime: u.runtime, session: u.session, transcriptPath: u.transcriptPath, reported: u.reported });
   // No usage to report (no transcript, nothing since the start): nothing to send.
   if (!agents.length) return "refused";
   return post(creds, { ...rest, agents });

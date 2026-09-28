@@ -24,8 +24,11 @@ const versionOf = (runtime, v) =>
   typeof v === "string" && VERSION.test(runtime + " " + v) ? { runtimeVersion: runtime + " " + v } : {};
 const timeOf = (r) => Date.parse(r?.timestamp);
 
-/** Every JSON line of a file; a malformed line becomes {}, an unreadable file []. */
-function lines(file) {
+/**
+ * Every JSON line of a file; a malformed line becomes {}, an unreadable file []. Lines logged after until (ms) are left
+ * out: a usage snapshot is as of the moment it was taken, however late it is read (CMD-518).
+ */
+function lines(file, until = Infinity) {
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -37,7 +40,8 @@ function lines(file) {
     if (!line) continue;
     try {
       const row = JSON.parse(line);
-      rows.push(row && typeof row === "object" ? row : {});
+      const kept = row && typeof row === "object" ? row : {};
+      if (!(timeOf(kept) > until)) rows.push(kept);
     } catch {
       rows.push({});
     }
@@ -188,8 +192,8 @@ function codexRole(meta) {
   return typeof role === "string" && role ? role.slice(0, 40) : "subagent";
 }
 
-function codexAgent(file, parent, since) {
-  const rows = lines(file);
+function codexAgent(file, parent, since, until) {
+  const rows = lines(file, until);
   const meta = rows.find((r) => r.type === "session_meta")?.payload ?? {};
   const span = window(rows, since);
   if (!span || typeof meta.id !== "string") return null;
@@ -218,7 +222,7 @@ function codexAgent(file, parent, since) {
   };
 }
 
-function codex({ since, session, transcriptPath, codexHome }) {
+function codex({ since, until, session, transcriptPath, codexHome }) {
   const files = recentFiles(join(codexHome, "sessions"), (f) => /rollout-[^/]*\.jsonl$/.test(f), since);
   let root = transcriptPath && existsSync(transcriptPath) ? transcriptPath : undefined;
   if (!root && session) root = files.find((f) => f.endsWith("-" + session + ".jsonl"));
@@ -245,7 +249,7 @@ function codex({ since, session, transcriptPath, codexHome }) {
   const agents = [];
   const seen = new Set();
   const visit = (file, parent) => {
-    const agent = codexAgent(file, parent, since);
+    const agent = codexAgent(file, parent, since, until);
     if (!agent || seen.has(agent.agentId)) return;
     seen.add(agent.agentId);
     agents.push(agent);
@@ -255,8 +259,8 @@ function codex({ since, session, transcriptPath, codexHome }) {
   return agents;
 }
 
-function claudeAgent(file, agentId, parentAgentId, role, configured, since) {
-  const rows = lines(file);
+function claudeAgent(file, agentId, parentAgentId, role, configured, since, until) {
+  const rows = lines(file, until);
   const span = window(rows, since);
   if (!span) return null;
   // One message can be logged more than once under the same id: it counts once.
@@ -310,7 +314,7 @@ function claudeTranscript(claudeHome, session, since) {
   return found.length === 1 ? found[0] : undefined;
 }
 
-function claude({ since, session, transcriptPath, claudeHome, configuredEffort }) {
+function claude({ since, until, session, transcriptPath, claudeHome, configuredEffort }) {
   const main =
     transcriptPath && existsSync(transcriptPath)
       ? transcriptPath
@@ -335,9 +339,9 @@ function claude({ since, session, transcriptPath, claudeHome, configuredEffort }
       meta = JSON.parse(readFileSync(join(subDir, "agent-" + agentId + ".meta.json"), "utf8")) ?? {};
     } catch {}
     const role = typeof meta.agentType === "string" && meta.agentType ? meta.agentType : "subagent";
-    return claudeAgent(file, agentId, id, role, configured(role), since);
+    return claudeAgent(file, agentId, id, role, configured(role), since, until);
   });
-  return [claudeAgent(main, id, null, "main", undefined, since), ...subs];
+  return [claudeAgent(main, id, null, "main", undefined, since, until), ...subs];
 }
 
 /**
@@ -345,9 +349,9 @@ function claude({ since, session, transcriptPath, claudeHome, configuredEffort }
  * changes, so only the last copy of each id counts. "gemini" messages carry model and tokens
  * {input, output, cached, thoughts, tool, total}. Gemini's input already includes the cached part.
  */
-function gemini({ since, session, transcriptPath }) {
+function gemini({ since, until, session, transcriptPath }) {
   if (!transcriptPath) return [];
-  const rows = lines(transcriptPath);
+  const rows = lines(transcriptPath, until);
   const byId = new Map();
   for (const r of rows) if (r?.type === "gemini" && r.id) byId.set(r.id, r);
   const inWindow = [...byId.values()].filter((r) => !(timeOf(r) < since));
@@ -395,12 +399,14 @@ function reportedAgent(session, r) {
 
 /**
  * The board's usage.reported agents for one run: root first, the rest by startedAt, at most 50.
- * since: ms epoch or ISO string. runtime: "codex" | "claude". session: the thread/session id.
+ * since: ms epoch or ISO string. until (optional, the same): log lines after it are left out. runtime: "codex" | "claude".
+ * session: the thread/session id.
  * transcriptPath: the root transcript, used directly when given. configuredEffort: (role) => effort
  * for a Claude sub-agent that logged none.
  */
 export function usage({
   since,
+  until,
   runtime,
   session,
   transcriptPath,
@@ -412,7 +418,8 @@ export function usage({
   try {
     const from = typeof since === "number" ? since : Date.parse(since ?? "");
     if (!Number.isFinite(from)) return [];
-    const opts = { since: from, session, transcriptPath, codexHome, claudeHome, configuredEffort };
+    const to = until === undefined ? Infinity : typeof until === "number" ? until : Date.parse(until);
+    const opts = { since: from, until: Number.isFinite(to) ? to : Infinity, session, transcriptPath, codexHome, claudeHome, configuredEffort };
     // Gemini CLI writes a JSONL transcript; OpenCode's plugin totals its own messages and sends them (reported).
     const agents = (runtime === "codex" ? codex(opts) : runtime === "claude" ? claude(opts) : runtime === "gemini" ? gemini(opts)
       : reported ? [reportedAgent(session, reported)] : []).filter(Boolean);

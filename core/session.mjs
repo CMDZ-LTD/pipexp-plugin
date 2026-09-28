@@ -40,6 +40,13 @@ const BEAT_MS = 30 * 60_000;
 const ACTIVITY_BEAT_MS = 4 * 60_000;
 export const ACTIVITY_BEATS = 300;
 export const ACTIVITY_STATES = ["working", "idle", "waiting", "blocked", "paused"];
+/** Why an explicit report cannot go, before anything is changed or sent; null when it can. */
+export function reportProblem(report) {
+  if (report?.type !== "activity") return null;
+  if (!ACTIVITY_STATES.includes(report.state)) return "Unknown activity state";
+  if (["waiting", "blocked", "paused"].includes(report.state) && !(typeof report.note === "string" && report.note.trim())) return "This status needs a reason";
+  return null;
+}
 // What the board takes as a sessionId (PipeXP #520 lib/event-schema.ts); any other id is left off, never the event.
 const SESSION_ID = /^[a-zA-Z0-9._-]{1,100}$/;
 const held = (s) => ["waiting", "blocked", "paused"].includes(s.activity?.state) || (s.activity?.source === "agent" && s.activity.state === "idle");
@@ -174,7 +181,9 @@ function sendActivity(s, ctx, out, at, beat = true) {
 /** A usage.reported the sender fills in from the transcript, so a hook never reads big files. */
 const usageMarker = (s, stage, at) => ({
   ...event(s, "usage.reported", { stage: stage ?? undefined }, at),
-  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt, ...(s.reported && { reported: s.reported }) },
+  // until: the snapshot is as of now, however late the flush reads the transcript (CMD-518: after a move, the old run's
+  // last usage must not take in the new project's work).
+  _usage: { runtime: s.runtime, session: s.sessionId, transcriptPath: s.transcriptPath, since: s.startedAt, until: new Date(at).toISOString(), ...(s.reported && { reported: s.reported }) },
 });
 
 function startFields(s, ctx, claim) {
@@ -256,8 +265,9 @@ function start(s, ctx, claim, out) {
   refresh(s, ctx);
   out.push(event(s, "run.started", startFields(s, ctx, claim), ctx.now));
   s.lastSentAt = ctx.now;
-  // A resumed run was finished on the board: re-entering its stage makes it active again.
-  if (s.finished && s.stage) enter(s, s.stage, ctx.now, out, {}, true);
+  // A resumed run was finished on the board: re-entering its stage makes it active again. Only a stage of this lane:
+  // the board refuses any other (CMD-370, 27 Sep 20:45:41 UTC: ship:S5 re-entered on the manager lane).
+  if (s.finished && s.stage?.startsWith(s.skill + ":")) enter(s, s.stage, ctx.now, out, {}, true);
   s.started = true;
   s.finished = false;
 }
@@ -280,7 +290,11 @@ export function onHook(state, input, ctx) {
   // Codex names each turn: turn_id is on UserPromptSubmit, PostToolUse and Stop (its hook input schemas require it). A
   // hook in a turn other than the last one seen starts a new turn even with no prompt: a delegated turn (a message from
   // another thread) fires no UserPromptSubmit. Runtimes that name no turn wait for a prompt, as before (CMD-518).
+  // A hook from a turn that already gave way to a later one arrived late (hooks are separate processes): it says nothing
+  // about the current turn, and after a move it must not touch the new project's run (CMD-518).
+  if (typeof input.turn_id === "string" && s.pastTurns?.includes(input.turn_id)) return { state: s, events: [] };
   const newTurn = typeof input.turn_id === "string" && !!s.turnId && input.turn_id !== s.turnId;
+  if (newTurn) s.pastTurns = [...(s.pastTurns ?? []), s.turnId].slice(-8);
   if (typeof input.turn_id === "string" && input.turn_id) s.turnId = input.turn_id;
   // PrFound comes from the flush, not the agent: it says nothing about whether the session is still going.
   if (name !== "PrFound") s.lastSeenAt = at;
@@ -327,13 +341,15 @@ export function onHook(state, input, ctx) {
     // The counts go with the next step.entered: this turn's end (Waiting for you) or a skill's next stage.
     if (!s.explicit) enter(s, STAGES.explore, at, out);
     // Back from waiting, a session that reports its own stages picks up the one it was in (CMD-374, CMD-518).
-    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage ?? RESUME[s.skill], at, out);
+    // managerStage is shared by the agent and manager lanes: only a stage of this lane is picked up.
+    else if (WAITING[s.skill] && s.stage === WAITING[s.skill]) enter(s, s.managerStage?.startsWith(s.skill + ":") ? s.managerStage : RESUME[s.skill], at, out);
     if (!out.length) out.push(event(s, "activity.reported", {}, at));
   } else if (name === "PostToolUse" || name === "PostToolUseFailure") {
     // A new turn is working, whatever was held (a board stop, or a status the agent reported); in the same turn a hold
     // stays. After a finish, only a turn that started since then is new work.
     const since = !s.finished || (!!s.finishedTurn && s.turnId !== s.finishedTurn);
-    if (newTurn || (since && !held(s))) activity(s, "working", at);
+    // The same work keeps its one-line description (an explicit note); a new turn starts without one (CMD-518).
+    if (newTurn || (since && !held(s))) activity(s, "working", at, "hook", !newTurn && s.activity?.state === "working" ? s.activity.note : undefined);
     // Finished (pipexp_finish, or the session handed back): the rest of this turn's tool calls leave the card at
     // Done (CMD-370: a finish was undone 144 ms later), and a later turn's never reopen it; only its activity goes.
     if (s.finished) {
@@ -347,7 +363,11 @@ export function onHook(state, input, ctx) {
     const pushed = PR_CMD.test(cmd) && !didFail;
     const pr = pushed ? prFrom(input.tool_response) : null;
     if (pr) { s.prNumber = pr; s.prDropped = false; s.ignorePrBranch = null; }
-    if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    if (SWITCH_CMD.test(cmd) && !didFail && refresh(s, ctx)) {
+      // Another branch is other work: the note described the old one.
+      if (s.activity?.note) activity(s, s.activity.state, at, s.activity.source);
+      out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    }
     // A push or PR that failed (no remote, no auth) leaves the card where it was.
     const guess = s.explicit ? null : stageForTool(input.tool_name, input.tool_input);
     const stage = guess === STAGES.pr && !pushed ? null : guess;
@@ -437,8 +457,8 @@ export function onReport(state, report, ctx) {
     s.ticketReported = true;
   }
   if (report.type === "activity") {
-    if (!ACTIVITY_STATES.includes(report.state)) throw new Error("Unknown activity state");
-    if (["waiting", "blocked", "paused"].includes(report.state) && !words(report.note)) throw new Error("This status needs a reason");
+    const problem = reportProblem(report);
+    if (problem) throw new Error(problem);
     activity(s, report.state, at, report.source === "hook" ? "hook" : "agent", ctx.content === "minimal" ? undefined : words(report.note));
     // Status changes do not reopen a finished workflow or claim its ticket is complete.
     if (!s.started || changedTicket) start(s, ctx, s.started ? "resume" : "new", out);
@@ -446,7 +466,7 @@ export function onReport(state, report, ctx) {
     out.push(event(s, "activity.reported", {}, at));
     return { state: s, events: out };
   }
-  if (report.type === "stage" || report.type === "run.started") activity(s, "working", at, "agent");
+  if (report.type === "run.started") activity(s, "working", at, "agent");
   // A finished workflow says nothing about whether the session is still working: only a blocked finish is a status.
   if (report.type === "run.finished" && fields.outcome === "blocked") activity(s, "blocked", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
   if (report.type === "stage") {
@@ -462,18 +482,23 @@ export function onReport(state, report, ctx) {
       if (fromSkillLane || s.runs[skill]) {
         // Another skill lane: its own run, started now, and a child of the lane it came from.
         const parent = s.runs.ship ?? s.runId;
-        s.runId = s.runs[skill] ?? uuid5("pipexp/session/" + s.sessionId + "/" + skill);
+        // A session that moved repo (s.scope) names its lane runs after that repo too, so no run id is in two projects.
+        s.runId = s.runs[skill] ?? uuid5("pipexp/session/" + s.sessionId + (s.scope ? "/repo/" + s.scope : "") + "/" + skill);
         if (!s.runs[skill]) {
           s.started = false;
           s.startedAt = new Date(at).toISOString();
           s.stage = null;
           s.fields = parent !== s.runId ? { parentRunId: parent } : {};
-        }
+        } else if (!s.stage?.startsWith(skill + ":")) s.stage = null; // the lane left's stage is not this run's
       }
       s.runs[skill] = s.runId;
       s.skill = skill;
       if (skill !== "agent") s.fields = { ...(ctx.probe.skillInfo?.(s.cwd, skill) ?? {}), ...s.fields };
     }
+    // Working is observed on the lane now in use only: the lane left above got its usage with the observation it had,
+    // so after ship, shepherd, ship the board's row is ship, never a tie with the lane just left (CMD-518).
+    // The agent's own one-line summary of the work may come with the stage (CMD-518); none under minimal content.
+    activity(s, "working", at, "agent", ctx.content === "minimal" ? undefined : words(report.note));
     s.explicit = true;
     if (moved || metadataChanged || changedTicket || report.claim || !s.started || s.finished) start(s, ctx, report.claim ?? (moved || !s.started ? "new" : "resume"), out);
     enter(s, report.stage, at, out, fields, true);

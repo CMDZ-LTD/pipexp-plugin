@@ -8,8 +8,8 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
-import { findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
-import { describe, stagesFor, supportsActivity } from "../core/stages.mjs";
+import { explicitReport, findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { describe, stagesFor } from "../core/stages.mjs";
 import { ACTIVITY_STATES, SNAG_KINDS, snagFields } from "../core/session.mjs";
 
 const STAGE = /^[a-z0-9-]{1,40}:S\d{1,2}$/;
@@ -45,6 +45,7 @@ const TOOLS = [
       properties: {
         stage: { type: "string", description: "lane:S<n>, e.g. agent:S3 or ship:S5" },
         ticket: { type: "string", description: "The tracker id this work is for, e.g. ABC-123. Optional." },
+        note: { type: "string", maxLength: 300, description: "One short line you write yourself on what you are working on. Never copy prompts, code, command output or your reasoning. Optional." },
         ...where,
       },
       required: ["stage"],
@@ -187,23 +188,28 @@ async function callTool(name, args = {}) {
     if (!ACTIVITY_STATES.includes(args.state)) return err("state must be working, idle, waiting, blocked or paused");
     if (args.note !== undefined && (typeof args.note !== "string" || args.note.length > 300)) return err("note must be at most 300 characters");
     if (["waiting", "blocked", "paused"].includes(args.state) && !args.note?.trim()) return err("Give a short note explaining this status");
-    const cwd = args.cwd ?? loadSession(id)?.cwd;
-    if (!supportsActivity(cwd)) await stagesFor(cwd);
-    if (!supportsActivity(cwd)) return err("This board does not support activity reports yet. Update the board first; no status was sent.");
-    const { state, events } = report(id, { type: "activity", state: args.state, note: args.note, ticket: args.ticket }, undefined, args.cwd);
+    // One path with the CLI (core/run.mjs explicitReport): a move to another project's repo is checked with the board first.
+    const r = await explicitReport(id, { type: "activity", state: args.state, note: args.note, ticket: args.ticket }, args.cwd);
+    if (r.error) return err(r.error);
+    const { state, events } = r;
     if (!events.length && state.shipOwned) return err("This session is reported by the repo's ship scripts; no status was sent.");
     return ok("Queued status: " + args.state + (state.ticket ? " for " + state.ticket : ""));
   }
   if (name === "pipexp_report_stage") {
     if (!STAGE.test(args.stage ?? "")) return err("stage looks like agent:S2 or ship:S4");
-    const { state, events } = report(id, { type: "stage", stage: args.stage, ticket: args.ticket }, undefined, args.cwd);
+    if (args.note !== undefined && (typeof args.note !== "string" || args.note.length > 300)) return err("note must be at most 300 characters");
+    const r = await explicitReport(id, { type: "stage", stage: args.stage, ticket: args.ticket, note: args.note }, args.cwd);
+    if (r.error) return err(r.error);
+    const { state, events } = r;
     if (!events.length && state.shipOwned) return ok("This session is already reported by the repo's ship scripts; nothing to add.");
     return ok("On the board: " + state.stage + (state.ticket ? " for " + state.ticket : ""));
   }
   if (name === "pipexp_report_snag") {
     // Codex does not hold agents to the enum or the required fields: snagFields makes whatever came a snag the board takes.
     const fields = snagFields({ kind: args.kind, theme: args.theme, what: args.what, note: args.note, description: args.description, costMin: args.cost_min });
-    report(id, { type: "snag.reported", fields }, undefined, args.cwd);
+    // The same path as every explicit report: from another project's folder it is refused, never filed or moved.
+    const r = await explicitReport(id, { type: "snag.reported", fields }, args.cwd);
+    if (r.error) return err(r.error);
     const asked = typeof args.kind === "string" ? args.kind.trim() : "";
     return ok("Snag recorded" + (asked && asked.toLowerCase() !== fields.kind ? " as kind snag (" + JSON.stringify(asked.slice(0, 40)) + " is not one of " + SNAG_KINDS.join(", ") + ")" : "") + ".");
   }
@@ -214,7 +220,9 @@ async function callTool(name, args = {}) {
     const pr = args.pr_number ?? args.prNumber ?? args.pr;
     if (pr !== undefined && pr !== null) fields.prNumber = pr;
     if (args.question) fields.question = args.question;
-    const { events } = report(id, { type: "run.finished", fields }, undefined, args.cwd);
+    const r = await explicitReport(id, { type: "run.finished", fields }, args.cwd);
+    if (r.error) return err(r.error);
+    const { events } = r;
     // What was recorded, read back from the event itself, so a dropped PR number shows at once.
     const sent = events.find((e) => e.type === "run.finished");
     if (!sent) return err("Nothing recorded: this session is reported by the repo's ship scripts.");

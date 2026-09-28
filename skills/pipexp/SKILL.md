@@ -13,14 +13,27 @@ Activity is separate from the workflow stage and ticket completion. Use the tool
 | Tool | When |
 |---|---|
 | `pipexp_stages` | Once, at the start of a session where you run a skill with stages: it lists this repo's lanes and stage ids as the board has them (each project sets its own). |
-| `pipexp_report_stage` | A skill you are running has stages: report each one on entry, using an id `pipexp_stages` listed (e.g. ship:S4). Also when the work is for a ticket (pass `ticket`, e.g. ABC-123). |
-| `pipexp_report_status` | Report `paused`, `blocked` or `waiting` with a short reason; `working` to resume, or `idle` when no work is running. Pass the current ticket when it changes. A status report never marks the ticket done. Requires a board with activity reporting support. |
+| `pipexp_report_stage` | A skill you are running has stages: report each one on entry, using an id `pipexp_stages` listed (e.g. ship:S4). Also when the work is for a ticket (pass `ticket`, e.g. ABC-123). You may pass `note`, your one-line summary (below). |
+| `pipexp_report_status` | `working` with a `note`: your one-line summary (below). `paused`, `blocked` or `waiting` with a short reason; `idle` when no work is running. Pass the current ticket when it changes. A status report never marks the ticket done. Requires a board with activity reporting support; on an older board it says so and nothing is sent. |
 | `pipexp_report_snag` | Something cost real time: a flaky test, a wrong doc, a missing tool. One or two sentences. |
 | `pipexp_ask_human` | You need a decision only a person can make. It waits on the board. If you know it waits on someone other than the person you work for, pass their GitHub login as `recipient`. If it returns `waiting`, call it again with the `question_id`. If it fails, ask in the chat. |
 | `pipexp_finish` | The work is done (`ready` with the PR number, `merged`), `blocked` on a person (say what in `question`), or `abandoned`. |
 | `pipexp_status` | The user asks whether PipeXP is working, or where this session is on the board. Its `summary` is one line: what is wrong and the fix. Tell the user that line as it is. |
 
 Always pass `cwd` (your working folder) so the report lands on this session's card.
+
+## Say what you are working on
+
+The board shows each agent's own one-line summary first. At the start of a task, and whenever your work really
+changes (a new ticket, a new part of the job), report one short line you write yourself: `pipexp_report_status` with
+state `working` and `note` (or `note` on `pipexp_report_stage`), with `ticket` when you know it, and `cwd`. From a
+script: `pipexp activity working --note "..."` or `pipexp stage agent:S2 --note "..."`.
+
+- Plain words for a person, at most 300 characters: "Adding the export button to Insights", not a file list.
+- Never copy prompts, code, command output or your reasoning into it. The plugin scrubs secrets and drops the line
+  on a project set to minimal content, but do not rely on that.
+- The line stays while you do that work, and goes when a new turn starts or you report a new stage or status.
+  Report it again when the work changes; do not repeat it on every step.
 
 ## Notes and stops from the board
 

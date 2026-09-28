@@ -48,9 +48,10 @@ test("a session in a repo whose project has a ship lane is told its stages at st
   assert.match(fire("gemini", { session_id: "ctx-gemini", cwd: shop, hook_event_name: "SessionStart" }).hookSpecificOutput.additionalContext, /ship:S0/);
   assert.match(fire("cursor", { conversation_id: "ctx-cursor", session_id: "ctx-cursor", cwd: shop, hook_event_name: "sessionStart" }).additional_context, /ship:S0/);
   const plain = checkout("acme/plain");
-  cache("acme/plain", agentOnly);
+  // As 0.1.19 writes it: with the board's capabilities (none here). A 0.1.18 cache without them is read again (note-upgrade.test.mjs).
+  cache("acme/plain", { ...agentOnly, capabilities: [] });
   assert.equal(fire("codex", { session_id: "ctx-plain", cwd: plain, hook_event_name: "SessionStart", source: "startup" }).hookSpecificOutput, undefined);
-  assert.deepEqual(startContext(plain), { text: "", stale: false });
+  assert.deepEqual(startContext(plain), { text: "", stale: false, legacy: false });
 });
 
 test("a session that starts before its repo's lanes are cached is told them at its first prompt, once; Cursor's prompt goes on", () => {
