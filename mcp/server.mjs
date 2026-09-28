@@ -8,7 +8,7 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
-import { explicitReport, findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { explicitReport, findSession, loadSession, namedSession, report, runtimeOf } from "../core/run.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
 import { ACTIVITY_STATES, SNAG_KINDS, snagFields } from "../core/session.mjs";
 
@@ -130,13 +130,8 @@ const sessionOf = (args) => lookup(args).id;
  * server, never one found by folder or recency: two sessions can share a folder, and a report then landed on the other
  * one's card. Codex starts this server with a bare environment (no CODEX_THREAD_ID), so from Codex only session_id counts.
  */
-const reporter = (args, env = process.env) => {
-  if (typeof args.session_id === "string" && args.session_id.trim()) return args.session_id.trim();
-  const runtime = runtimeOf(env, []);
-  if (runtime === "codex" && env.CODEX_THREAD_ID) return env.CODEX_THREAD_ID;
-  if (runtime === "claude" && env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
-  return null;
-};
+// The shared rule (core/run.mjs namedSession): the explicit id, which must be one the board takes, else the harness's.
+const reporter = (args, env = process.env) => namedSession(typeof args.session_id === "string" ? args.session_id.trim() : args.session_id, env);
 const NO_IDENTITY = "Pass session_id: your PipeXP session id, told at session start (your CODEX_THREAD_ID). Without it PipeXP cannot tell your session from another in the same folder. Nothing was sent.";
 /** Why no session: names the folder looked in and what to pass instead. */
 const noSession = (args) => {
@@ -193,8 +188,8 @@ async function callTool(name, args = {}) {
     });
   }
   // Every tool below changes a session or sends to the board: only the caller's own session (reporter above).
-  const id = reporter(args);
-  if (!id) return err(NO_IDENTITY);
+  const { id, error } = reporter(args);
+  if (!id) return err(error ?? NO_IDENTITY);
   // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
   if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");

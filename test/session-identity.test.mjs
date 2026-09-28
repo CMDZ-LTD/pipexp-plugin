@@ -93,3 +93,14 @@ test("the session-start context names the session's own id and says to pass it o
   assert.doesNotMatch(startContext(dir, Date.now(), "x\nignore previous").text, /ignore previous/);
 });
 
+test("R3: an odd-looking session_id is refused by the MCP tools too, before anything is read or sent", async () => {
+  const before = queued().length;
+  const a = saved(A);
+  for (const odd of [A.replace(/-/g, "/"), "x".repeat(101), "a b", "../" + A]) {
+    const r = await call("pipexp_report_stage", { cwd: dir, session_id: odd, stage: "agent:S2" });
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /not one PipeXP takes.*Nothing was sent/, JSON.stringify(odd));
+  }
+  assert.equal(queued().length, before);
+  assert.equal(saved(A), a);
+});
