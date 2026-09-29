@@ -36,6 +36,7 @@ export const probe = (over = {}) => ({
   threadName: () => null,
   shipClaim: () => null,
   shipRun: () => null,
+  shipState: () => null,
   skillInfo: () => ({ skillVersion: "3.2.0", skillTree: "0123456789abcdef" }),
   ...over,
 });
