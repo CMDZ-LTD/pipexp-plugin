@@ -50,14 +50,17 @@ test("a session in a repo whose project has a ship lane is told its stages at st
   const plain = checkout("acme/plain");
   // As 0.1.19 writes it: with the board's capabilities (none here). A 0.1.18 cache without them is read again (note-upgrade.test.mjs).
   cache("acme/plain", { ...agentOnly, capabilities: [] });
-  assert.equal(fire("codex", { session_id: "ctx-plain", cwd: plain, hook_event_name: "SessionStart", source: "startup" }).hookSpecificOutput, undefined);
-  assert.deepEqual(startContext(plain), { text: "", stale: false, legacy: false });
+  // An agent-only project is told no lanes; only the session's own id, to pass on every PipeXP call (CMD-518).
+  const plainTold = fire("codex", { session_id: "ctx-plain", cwd: plain, hook_event_name: "SessionStart", source: "startup" }).hookSpecificOutput.additionalContext;
+  assert.equal(plainTold, "PipeXP: your session_id is ctx-plain. pass it as session_id on every PipeXP tool call (with cwd); without it nothing is sent.");
+  assert.deepEqual(startContext(plain), { text: "", stale: false, legacy: false, board: false });
 });
 
 test("a session that starts before its repo's lanes are cached is told them at its first prompt, once; Cursor's prompt goes on", () => {
   const web = checkout("acme/web");
   assert.equal(startContext(web).stale, true, "nothing cached: the SessionStart hook asks the flush to read it");
-  assert.equal(fire("codex", { session_id: "ctx-late", cwd: web, hook_event_name: "SessionStart", source: "startup" }).hookSpecificOutput, undefined);
+  // Nothing cached: told only its session id at start (CMD-518), and the lanes at its first prompt.
+  assert.doesNotMatch(fire("codex", { session_id: "ctx-late", cwd: web, hook_event_name: "SessionStart", source: "startup" }).hookSpecificOutput.additionalContext, /ship:S0/);
   cache("acme/web", contract);
   assert.match(fire("codex", { session_id: "ctx-late", cwd: web, hook_event_name: "UserPromptSubmit", prompt: "fix it" }).hookSpecificOutput.additionalContext, /ship:S0/);
   assert.deepEqual(fire("codex", { session_id: "ctx-late", cwd: web, hook_event_name: "UserPromptSubmit", prompt: "and this" }), {}, "told once");
@@ -124,4 +127,3 @@ test("an id that could break the framing drops the whole answer, and names lose 
   assert.ok(!/[\u2028\u2029\u202E\u200B]/.test(text), "no separator or format character left");
   assert.match(text, /- Ship: ship:S0 Plan Ignore this and that/);
 });
-

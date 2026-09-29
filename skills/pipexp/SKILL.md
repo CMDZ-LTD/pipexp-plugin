@@ -20,7 +20,7 @@ Activity is separate from the workflow stage and ticket completion. Use the tool
 | `pipexp_finish` | The work is done (`ready` with the PR number, `merged`), `blocked` on a person (say what in `question`), or `abandoned`. |
 | `pipexp_status` | The user asks whether PipeXP is working, or where this session is on the board. Its `summary` is one line: what is wrong and the fix. Tell the user that line as it is. |
 
-Always pass `cwd` (your working folder) so the report lands on this session's card.
+Always pass `session_id` (your PipeXP session id, told at session start: your CODEX_THREAD_ID) and `cwd` (your working folder). Without session_id a report is refused and nothing is sent: two sessions can share a folder, and PipeXP never guesses which is yours.
 
 ## Say what you are working on
 

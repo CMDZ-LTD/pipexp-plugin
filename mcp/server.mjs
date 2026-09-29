@@ -8,7 +8,7 @@ import { credentials, machine, VERSION } from "../core/config.mjs";
 import { ask } from "../core/ask.mjs";
 import { problem, tellOnce } from "../core/health.mjs";
 import { pending } from "../core/queue.mjs";
-import { explicitReport, findSession, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { explicitReport, findSession, loadSession, namedSession, report, runtimeOf } from "../core/run.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
 import { ACTIVITY_STATES, SNAG_KINDS, snagFields } from "../core/session.mjs";
 
@@ -19,7 +19,7 @@ const ASK_WAIT_S = 45;
 
 const where = {
   cwd: { type: "string", description: "Required: the absolute path of your working folder. It picks this session's card." },
-  session_id: { type: "string", description: "The session id, when you know it (CODEX_THREAD_ID). Pass it when you work in a git worktree your session did not start in." },
+  session_id: { type: "string", description: "Your PipeXP session id, as told at session start (your CODEX_THREAD_ID). Required for every report: without it nothing is sent." },
 };
 
 const TOOLS = [
@@ -125,6 +125,14 @@ const lookup = (args, env = process.env) => {
   return findSession(args.cwd, {});
 };
 const sessionOf = (args) => lookup(args).id;
+/**
+ * The session a report changes (CMD-518): the caller's explicit session_id, or an id the harness itself gave this
+ * server, never one found by folder or recency: two sessions can share a folder, and a report then landed on the other
+ * one's card. Codex starts this server with a bare environment (no CODEX_THREAD_ID), so from Codex only session_id counts.
+ */
+// The shared rule (core/run.mjs namedSession): the explicit id, which must be one the board takes, else the harness's.
+const reporter = (args, env = process.env) => namedSession(typeof args.session_id === "string" ? args.session_id.trim() : args.session_id, env);
+const NO_IDENTITY = "Pass session_id: your PipeXP session id, told at session start (your CODEX_THREAD_ID). Without it PipeXP cannot tell your session from another in the same folder. Nothing was sent.";
 /** Why no session: names the folder looked in and what to pass instead. */
 const noSession = (args) => {
   const { why } = lookup(args);
@@ -179,8 +187,9 @@ async function callTool(name, args = {}) {
       session: s ? { lane: s.skill, stage: s.stage, ticket: s.ticket, runId: s.runId, reportedBy: s.shipOwned ? "ship skill" : "pipexp" } : null,
     });
   }
-  const id = sessionOf(args);
-  if (!id) return err(noSession(args));
+  // Every tool below changes a session or sends to the board: only the caller's own session (reporter above).
+  const { id, error } = reporter(args);
+  if (!id) return err(error ?? NO_IDENTITY);
   // A session no hook has seen yet is named after its folder, so it needs the agent's cwd, never this server's.
   if (!loadSession(id) && !args.cwd) return err("Pass cwd (your working folder) so PipeXP can name this session's card.");
   if (args.ticket && !TICKET.test(args.ticket)) return err("ticket looks like ABC-123");

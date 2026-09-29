@@ -19,6 +19,23 @@ import { restartPlan, startRestart } from "./restart.mjs";
 const FLUSH = fileURLToPath(new URL("../bin/flush.mjs", import.meta.url));
 const sessions = () => join(stateDir(), "sessions");
 const safe = (id) => String(id).replace(/[^\w.-]/g, "_").slice(0, 120);
+// A session id as the board takes it (PipeXP lib/event-schema.ts sessionId). Only these are accepted from a caller, so
+// two different ids can never share one state file (safe() above would map "a/b" and "a_b" to the same name).
+export const validSessionId = (id) => typeof id === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(id);
+/**
+ * The session a report or change names (CMD-518): the caller's explicit id, else the id the harness puts in this
+ * process's environment (Codex sets CODEX_THREAD_ID in each thread's shell, Claude Code CLAUDE_CODE_SESSION_ID), never
+ * one found by folder or recency. { id } or { error }.
+ */
+export function namedSession(explicit, env = process.env) {
+  if (explicit !== undefined && explicit !== null && explicit !== "") {
+    return validSessionId(explicit) ? { id: explicit } : { error: "That session id is not one PipeXP takes (letters, digits, dot, dash, underscore; at most 100). Nothing was sent." };
+  }
+  const runtime = runtimeOf(env, []);
+  const given = runtime === "codex" ? env.CODEX_THREAD_ID : runtime === "claude" ? env.CLAUDE_CODE_SESSION_ID : undefined;
+  if (validSessionId(given)) return { id: given };
+  return { error: null };
+}
 export const sessionFile = (id) => join(sessions(), safe(id) + ".json");
 export const loadSession = (id) => readJson(sessionFile(id));
 const settings = () => readJson(join(stateDir(), "..", "settings.json")) ?? {};
@@ -274,6 +291,7 @@ const otherScope = (session, cwd) =>
  * Returns { error } when nothing was moved or sent, else what report returns.
  */
 export async function explicitReport(sessionId, rep, cwd, runtime = runtimeOf()) {
+  if (!validSessionId(sessionId)) return { error: "That session id is not one PipeXP takes (letters, digits, dot, dash, underscore; at most 100). Nothing was sent." };
   const problem = reportProblem(rep);
   if (problem) return { error: problem };
   const existing = loadSession(sessionId);

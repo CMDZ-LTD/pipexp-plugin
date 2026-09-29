@@ -24,7 +24,7 @@ import { installCursor, installOpencode, uninstallCursor } from "../core/install
 import { ask } from "../core/ask.mjs";
 import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
-import { contentFor, currentSession, explicitReport, loadSession, report, runtimeOf } from "../core/run.mjs";
+import { contentFor, currentSession, explicitReport, loadSession, namedSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
 import { describe, stagesFor } from "../core/stages.mjs";
@@ -80,7 +80,15 @@ const parse = (s, what) => {
   return fail(what + " is not a JSON object");
 };
 const settingsContent = () => readJson(join(home(), "settings.json"))?.content;
-const session = () => values.session ?? currentSession() ?? fail("no session found; pass --session <id>");
+// A command that sends or changes a session names it (CMD-518): --session, else the id the harness puts in this shell
+// (Codex: CODEX_THREAD_ID; Claude Code: CLAUDE_CODE_SESSION_ID). Never the folder or the most recent. Without one, nothing
+// is sent; a report says so and exits 0 (never fails a script), ask exits 3 as when it gets no answer.
+const session = (code = 0) => {
+  const { id, error } = namedSession(values.session);
+  if (id) return id;
+  process.stderr.write("pipexp: " + (error ?? "Pass --session <id>: your PipeXP session id (in a Codex shell, CODEX_THREAD_ID is set for you). PipeXP never guesses which session in this folder is yours. Nothing was sent.") + "\n");
+  process.exit(code);
+};
 
 async function main() {
   if (cmd === "connect") {
@@ -200,7 +208,7 @@ async function main() {
   }
   if (cmd === "ask") {
     // The link goes to stderr at once, so a person nearby can answer before the wait ends; stdout stays the answer.
-    const r = await ask({ sessionId: session(), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || undefined, recipient: values.recipient, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
+    const r = await ask({ sessionId: session(3), question: arg ?? "", context: values.context, options: values.option, timeoutMin: Number(values["timeout-min"]) || undefined, recipient: values.recipient, questionId: values["question-id"], wait: "all", onAsked: (link) => process.stderr.write("Answer it here: " + link + "\n") });
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
