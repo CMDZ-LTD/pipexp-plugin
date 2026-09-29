@@ -130,8 +130,7 @@ export function githubLogin() {
  * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
  */
-export function shipClaim(cwd, sessionId) {
-  const g = git(cwd);
+export function shipClaim(cwd, sessionId, g = git(cwd)) {
   if (!g?.common || !g.top) return null;
   if (!existsSync(join(g.top, ".claude", "skills", "ship", "scripts", "telemetry", "emit.mjs"))) return null;
   const root = join(g.common, "ship");
@@ -148,6 +147,60 @@ export function shipClaim(cwd, sessionId) {
     } catch {}
   }
   return null;
+}
+
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TICKET = /^[A-Z][A-Z0-9]{0,9}-\d{1,6}$/;
+const readJson = (path) => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A ship ticket's state from <git common dir>/ship/<ticket>/: who holds its claim, its board run id (the scripts clear it
+ * when they finish the run), status and PR (what the scripts' own finish reports), start fields and the step in progress.
+ * Undefined when git can't be read (say nothing), null when the ticket has no state.
+ */
+export function shipState(cwd, ticket, g = git(cwd)) {
+  if (!g?.common) return undefined;
+  if (!TICKET.test(ticket ?? "")) return null;
+  const dir = join(g.common, "ship", ticket);
+  const state = readJson(join(dir, "state.json"));
+  if (!state) return null;
+  let fields = null;
+  try {
+    const f = typeof state.runFields === "string" ? JSON.parse(state.runFields) : state.runFields;
+    if (f && typeof f === "object") fields = { title: f.title ?? null, owner: f.owner ?? null, profile: f.profile ?? null, branch: f.branch ?? null };
+  } catch {}
+  // Step 11 (log findings) runs alongside the others: the step in progress is the latest of 0 to 10.
+  const steps = Array.isArray(state.steps) ? state.steps : [];
+  const doing = steps.filter((s) => s?.status === "in_progress").map((s) => Number(s.step ?? s.id)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 10);
+  return {
+    ticket,
+    // The lock folder itself: gone once the claim is released. Its owner.json is rewritten on every heartbeat (not
+    // atomically), so an unreadable owner proves nothing.
+    locked: existsSync(join(dir, "owner.lock")),
+    owner: readJson(join(dir, "owner.lock", "owner.json"))?.task ?? null,
+    runId: RUN_ID.test(state.runId ?? "") ? state.runId.toLowerCase() : null,
+    status: typeof state.status === "string" ? state.status : null,
+    pr: Number.isInteger(state.pr) && state.pr > 0 ? state.pr : null,
+    fields,
+    step: doing.length ? Math.max(...doing) : null,
+  };
+}
+
+/**
+ * The ship run this session's claim belongs to (shipState of the claimed ticket). Null when this session holds no claim,
+ * undefined when git can't be read. One git call.
+ */
+export function shipRun(cwd, sessionId) {
+  const g = git(cwd);
+  if (!g?.common || !g.top) return undefined;
+  const ticket = shipClaim(cwd, sessionId, g);
+  return ticket ? shipState(cwd, ticket, g) ?? null : null;
 }
 
 /** The fingerprint the ship scripts send: a skill's version from SKILL.md and a hash of its files (same bytes as emit.mjs skillTree). */
