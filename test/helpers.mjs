@@ -35,6 +35,7 @@ export const probe = (over = {}) => ({
   git: () => ({ branch: "codex/abc-12-fix-login", repo: "shop", top: "/repo", common: "/repo/.git" }),
   threadName: () => null,
   shipClaim: () => null,
+  shipRun: () => null,
   skillInfo: () => ({ skillVersion: "3.2.0", skillTree: "0123456789abcdef" }),
   ...over,
 });

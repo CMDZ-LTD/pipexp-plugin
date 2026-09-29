@@ -187,6 +187,20 @@ const usageMarker = (s, stage, at) => ({
 });
 
 function startFields(s, ctx, claim) {
+  // On the ship scripts' own run: their title, profile and branch stay (a start overwrites all four), with who is on it.
+  if (s.joined) {
+    const f = s.shipFields ?? {};
+    return {
+      title: f.title || s.ticket || "Ship run",
+      owner: ctx.content === "minimal" ? null : (f.owner ?? s.owner ?? null),
+      profile: f.profile ?? null,
+      branch: f.branch ?? null,
+      claim,
+      machineId: ctx.machineId,
+      pluginVersion: "pipexp " + VERSION,
+      runtimeVersion: s.runtimeVersion,
+    };
+  }
   const { title: _title, ...fields } = ctx.content === "minimal" ? s.fields : {};
   // The old checkout's PR is unlinked once, with the first start after the change (R5 on #520). A later start on the same
   // branch leaves prNumber out, so a PR the board linked by itself stays linked even when this machine's lookup finds none.
@@ -277,6 +291,48 @@ const revive = (s, ctx, out) => {
   else if (s.finished) start(s, ctx, "resume", out);
 };
 
+const SHIP_CHECK_MS = 60_000;
+const shipStep = (stage) => (/^ship:S\d+$/.test(stage ?? "") ? Number(stage.slice(6)) : -1);
+
+/**
+ * A session the repo's ship scripts have claimed reports onto their run, so its ticket has one card that keeps moving
+ * (Derek, 29 Sep: cards sat at Take the ticket for hours). Before, the plugin went quiet under a claim, but the scripts
+ * report a step only when the agent remembers --step, and never live activity: the card froze, and the plugin's own
+ * run was left behind as a second, stuck card. Now the plugin closes its own run once, then sends activity, the PR, the
+ * agent's stage reports and the step ship's state.json has in progress to the ship run. A claim whose scripts started
+ * no run (telemetry off) changes nothing: the plugin reports the session as its own. Checked at turn edges, on ship's
+ * claim script, and at most once a minute otherwise.
+ */
+function followShip(s, ctx, at, out, force = false) {
+  if (!force && at - (s.shipCheckedAt ?? 0) < SHIP_CHECK_MS) return;
+  s.shipCheckedAt = at;
+  s.shipOwned = false; // older plugins went quiet under a claim; nothing does now
+  const ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
+  if (!ship?.runId) return;
+  if (ship.fields) s.shipFields = ship.fields;
+  if (s.joined !== ship.runId) {
+    if (s.started && !s.finished && s.runId !== ship.runId) out.push(event(s, "run.finished", { outcome: "abandoned", prNumber: null }, at));
+    s.runs = { ...(s.runs ?? {}), ship: ship.runId };
+    s.runId = ship.runId;
+    s.skill = "ship";
+    s.ticket = ship.ticket;
+    s.ticketReported = true;
+    // Stages come from the agent and from ship's state from here on, never guessed from tool calls.
+    s.explicit = true;
+    s.started = true;
+    s.finished = false;
+    // The scripts' own claim decides which attempt the board follows: this plugin never starts one on their run.
+    delete s.attemptId;
+    s.stage = null;
+    s.joined = ship.runId;
+    refresh(s, ctx);
+    out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
+    s.lastSentAt = at;
+  }
+  // ship's state.json says which step is in progress; only a later one moves the card, so it never steps back.
+  if (ship.step !== null && ship.step > shipStep(s.stage)) enter(s, "ship:S" + ship.step, at, out);
+}
+
 /**
  * One hook. ctx: { now, runtime, machineId, runtimeVersion?, content, probe: { git, threadName, shipClaim } }.
  * Returns { state, events }. Unknown hooks change nothing.
@@ -313,22 +369,14 @@ export function onHook(state, input, ctx) {
   const learnedPr = !!known && known !== s.prNumber;
   if (learnedPr) { s.prNumber = known; s.prDropped = false; }
 
-  // Until a ship skill reports through the plugin, a session holding a ship claim is reported by ship itself.
-  // Checked at turn edges and when a tool call runs ship's claim script, so other tool calls never pay for it.
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || (name === "PostToolUse" && /claim-run\.sh/.test(commandOf(input.tool_input)));
-  if (edge && !s.shipOwned && !s.explicit && ctx.probe.shipClaim(s.cwd, s.sessionId)) {
-    s.shipOwned = true;
-    if (s.started && !s.finished) out.push(event(s, "run.finished", { outcome: "abandoned", prNumber: null }, at));
-    s.finished = true;
-    return { state: s, events: out };
-  }
-  if (s.shipOwned) return { state: s, events: [] };
+  if (name !== "PrFound") followShip(s, ctx, at, out, edge);
 
   if (name === "SessionStart") {
     if (input.source === "compact" && s.started && !s.finished) return { state: s, events: [] };
     if (!s.activity) activity(s, "idle", at);
-    start(s, ctx, s.started ? "resume" : "new", out);
-    if (!s.stage) enter(s, STAGES.explore, at, out);
+    if (!out.some((e) => e.type === "run.started")) start(s, ctx, s.started ? "resume" : "new", out);
+    if (!s.stage && !s.joined) enter(s, STAGES.explore, at, out);
   } else if (name === "UserPromptSubmit") {
     const was = s.started && !s.finished;
     // A person wrote to the agent. One sent while a turn was still running (no Stop since the last) interrupted it.
@@ -407,6 +455,11 @@ export function onHook(state, input, ctx) {
   } else if (name === "SessionEnd") {
     if (!s.started || s.finished) return { state: s, events: [] };
     if (!held(s)) activity(s, "idle", at);
+    // The ship scripts finish their own run; a session ending says only that nobody is working on it now.
+    if (s.joined) {
+      out.push(usageMarker(s, s.stage, at), event(s, "activity.reported", {}, at));
+      return { state: s, events: out };
+    }
     // Waiting spends no tokens: Stop already reported the turn's usage.
     if (s.stage !== STAGES.waiting) out.push(usageMarker(s, s.stage, at));
     // A session that ends after its turn finished was handed back to its person: ready. One cut off mid-turn
@@ -438,12 +491,7 @@ export function onReport(state, report, ctx) {
   const out = [];
   const at = ctx.now;
   s.lastSeenAt = at;
-  // While a repo's own ship scripts still send telemetry, a session they claimed is theirs: reporting it here
-  // too would put a second card on the board. The guard turns itself off once those scripts are gone.
-  if (ctx.probe.shipClaim(s.cwd, s.sessionId)) {
-    s.shipOwned = true;
-    return { state: s, events: [] };
-  }
+  followShip(s, ctx, at, out, true);
   const fields = report.type === "snag.reported" ? snagFields(report.fields) : { ...(report.fields ?? {}) };
   const metadataChanged = s.started && (report.type === "stage" || report.type === "activity") && refresh(s, ctx);
   const changedTicket = !!report.ticket && report.ticket !== s.ticket;
@@ -473,7 +521,7 @@ export function onReport(state, report, ctx) {
     const skill = report.stage.split(":")[0];
     const moved = skill !== s.skill;
     // A claim (new, resume or takeover) is a new attempt: only the latest attempt moves the card on the board.
-    if (report.claim) s.attemptId = randomUUID();
+    if (report.claim && !s.joined) s.attemptId = randomUUID();
     if (moved) {
       // Tokens spent so far belong to the stage being left, on the run being left.
       if (s.started && !s.finished && s.stage) out.push(usageMarker(s, s.stage, at));

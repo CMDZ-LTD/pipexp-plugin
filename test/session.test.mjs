@@ -132,18 +132,51 @@ test("three failing test runs in a row report a snag, once", () => {
   assert.equal(snags[0].costMin, null);
 });
 
-test("a session holding a ship claim is left to the ship skill; its guessed run is closed", () => {
-  let claimed = false;
-  const c = { probe: probe({ shipClaim: () => (claimed ? "NJ-3236" : null) }) };
+const SHIP_RUN = "197441e4-3447-4267-b828-227a562b74ba";
+const shipRun = (over = {}) => ({ ticket: "NJ-3321", runId: SHIP_RUN, fields: { title: "Penalties looks flat", owner: null, profile: "standard", branch: "codex/nj-3321" }, step: null, ...over });
+
+test("a session the ship scripts claim reports onto their run: its own run closes once, the card keeps moving", () => {
+  // NJ-3321, 29 Sep: the claim froze the card at Take the ticket for 2 hours while the agent built and proved the fix.
+  let ship = null;
+  const c = { probe: probe({ shipRun: () => ship }) };
   const first = play([[0, { hook_event_name: "UserPromptSubmit" }]], c);
-  claimed = true;
-  const plain = onHook(first.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }, ctx(T0 + 2 * MIN, c));
-  assert.equal(plain.state.shipOwned, false, "an ordinary tool call does not look for a claim");
-  const r = onHook(plain.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3236 " + SID } }, ctx(T0 + 5 * MIN, c));
-  assert.deepEqual(brief(r.events), ["run.finished"]);
+  ship = shipRun();
+  const r = onHook(first.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3321 " + SID } }, ctx(T0 + 5 * MIN, c));
+  assert.deepEqual(brief(r.events), ["run.finished", "run.started"]);
+  assert.equal(r.events[0].runId, first.state.runId, "the plugin's own run closes");
   assert.equal(r.events[0].outcome, "abandoned");
-  const later = onHook(r.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 6 * MIN, c));
-  assert.deepEqual(later.events, []);
+  const started = r.events[1];
+  assert.equal(started.runId, SHIP_RUN);
+  assert.equal(started.skill, "ship");
+  assert.equal(started.ticket, "NJ-3321");
+  // The scripts' own title, profile and branch stay; the plugin adds who is on it and its version.
+  assert.deepEqual([started.title, started.profile, started.branch, started.claim], ["Penalties looks flat", "standard", "codex/nj-3321", "resume"]);
+  assert.equal(started.owner, null, "no GitHub login known in the test");
+  assert.equal(started.pluginVersion, "pipexp " + VERSION);
+  assert.equal(started.attemptId, undefined, "never a new attempt on the scripts' run");
+  // Ship's state.json moves to step 5: the next check (a minute on) moves the card, and tool calls guess nothing.
+  ship = shipRun({ step: 5 });
+  const soon = onHook(r.state, { ...base, hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }, ctx(T0 + 5 * MIN + 30_000, c));
+  assert.ok(!soon.events.some((e) => e.type === "step.entered"), "checked at most once a minute");
+  const later = onHook(soon.state, { ...base, hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: {} }, ctx(T0 + 7 * MIN, c));
+  const step = later.events.find((e) => e.type === "step.entered");
+  assert.equal(step.stage, "ship:S5");
+  assert.equal(step.runId, SHIP_RUN);
+  // A turn ends: ship's run gets the session idle, never a Waiting stage and never a finish.
+  const stop = onHook(later.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 8 * MIN, c));
+  assert.ok(stop.events.every((e) => e.runId === SHIP_RUN && e.type !== "run.finished" && !(e.stage ?? "").startsWith("agent:")));
+  assert.equal(stop.state.activity.state, "idle");
+  const end = onHook(stop.state, { ...base, hook_event_name: "SessionEnd" }, ctx(T0 + 9 * MIN, c));
+  assert.ok(!end.events.some((e) => e.type === "run.finished"), "the scripts finish their own run");
+});
+
+test("a claim whose scripts started no run leaves the session to the plugin, and an older quiet session wakes up", () => {
+  // NJ-3326, 29 Sep: telemetry off for the scripts, so nothing reached the board while the plugin stayed quiet.
+  const c = { probe: probe({ shipRun: () => null }) };
+  const s = { ...play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, shipOwned: true };
+  const r = onReport(s, { type: "stage", stage: "ship:S7", ticket: "NJ-3326" }, ctx(T0 + MIN, c));
+  assert.deepEqual(brief(r.events), ["usage.reported agent:S1", "run.started", "step.entered ship:S7"]);
+  assert.equal(r.state.shipOwned, false);
 });
 
 test("a skill reporting ship stages moves the run into the ship lane, with its fingerprint; hooks stop guessing", () => {
@@ -165,11 +198,15 @@ test("a skill reporting ship stages moves the run into the ship lane, with its f
   assert.deepEqual(next.events[1].counters, { humanTurns: 1, interrupts: 0, reviewRound: 2 });
 });
 
-test("while ship's own scripts hold a claim on the session, a stage report adds nothing (no second card)", () => {
-  const s = play([[0, { hook_event_name: "UserPromptSubmit" }]]).state;
-  const r = onReport(s, { type: "stage", stage: "ship:S4", ticket: "NJ-1" }, ctx(T0 + MIN, { probe: probe({ shipClaim: () => "NJ-1" }) }));
-  assert.deepEqual(r.events, []);
-  assert.equal(r.state.shipOwned, true);
+test("an agent's stage report under a ship claim lands on the scripts' run, and ship's state never moves it back", () => {
+  // NJ-3331, 29 Sep: the agent's reports were dropped and its early run stayed at Take the ticket beside the real one.
+  const c = { probe: probe({ shipRun: () => shipRun({ ticket: "NJ-3331", step: 2 }) }) };
+  const s = play([[0, { hook_event_name: "UserPromptSubmit" }]], { probe: probe() }).state;
+  const r = onReport(s, { type: "stage", stage: "ship:S4", ticket: "NJ-3331" }, ctx(T0 + MIN, c));
+  assert.deepEqual(brief(r.events), ["run.finished", "run.started", "step.entered ship:S2", "usage.reported ship:S2", "step.entered ship:S4"]);
+  assert.ok(r.events.slice(1).every((e) => e.runId === SHIP_RUN));
+  const again = onHook(r.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
+  assert.ok(!again.events.some((e) => e.type === "step.entered" && e.stage === "ship:S2"), "a stage ahead of ship's state stays");
 });
 
 test("a second skill lane in one session is its own run, a child of the ship run (no ship scripts)", () => {

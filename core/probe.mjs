@@ -150,6 +150,34 @@ export function shipClaim(cwd, sessionId) {
   return null;
 }
 
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The ship run this session's claim belongs to, from the ship scripts' <git common dir>/ship/<ticket>/state.json: its run
+ * id (only once the scripts started one on the board), the run's own start fields, and the ship step in progress (the
+ * highest one marked in_progress). Null with no claim or no run: the plugin then reports the session itself.
+ */
+export function shipRun(cwd, sessionId) {
+  const ticket = shipClaim(cwd, sessionId);
+  if (!ticket) return null;
+  let state;
+  try {
+    const g = git(cwd);
+    state = JSON.parse(readFileSync(join(g.common, "ship", ticket, "state.json"), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!RUN_ID.test(state?.runId ?? "")) return null;
+  let fields = null;
+  try {
+    const f = typeof state.runFields === "string" ? JSON.parse(state.runFields) : state.runFields;
+    if (f && typeof f === "object") fields = { title: f.title ?? null, owner: f.owner ?? null, profile: f.profile ?? null, branch: f.branch ?? null };
+  } catch {}
+  const steps = Array.isArray(state.steps) ? state.steps : [];
+  const doing = steps.filter((s) => s?.status === "in_progress").map((s) => Number(s.step ?? s.id)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 11);
+  return { ticket, runId: state.runId.toLowerCase(), fields, step: doing.length ? Math.max(...doing) : null };
+}
+
 /** The fingerprint the ship scripts send: a skill's version from SKILL.md and a hash of its files (same bytes as emit.mjs skillTree). */
 export function skillInfo(cwd, skill) {
   const g = git(cwd);
