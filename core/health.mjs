@@ -8,6 +8,7 @@ import { credentials, machine, osName, readJson, stateDir, underTest, VERSION, w
 import { disconnected } from "./connect.mjs";
 import { droppedCount, enqueue, pending } from "./queue.mjs";
 import { restartAllowed } from "./restart.mjs";
+import { shipAllowed } from "./ship.mjs";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -156,6 +157,8 @@ export function audit(now = Date.now()) {
       lastEventAt: flushNote().sentAt ?? null,
       // Whether the board may restart this machine's runs (CMD-80): the card greys Restart out where it is off.
       canRestart: restartAllowed(),
+      // Whether the board may open a new Codex thread here to ship a ticket: the Ship dialog offers only machines where it is on.
+      canShip: shipAllowed(),
     },
   };
 }

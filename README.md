@@ -87,6 +87,8 @@ Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`,
 
 ```text
 pipexp connect | status | disconnect | flush | preview [--all] [--raw] | allow restart | deny restart | content standard|minimal
+pipexp allow ship | deny ship  let the board's Ship button open a new Codex thread here (macOS: adds a launchd job that asks every 20 s)
+pipexp ship-poll               open the threads the board asked for now (what the launchd job runs)
 pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'
