@@ -173,13 +173,13 @@ test("a session the ship scripts claim reports onto their run: its own run close
 test("the plugin lets go of a ship run the scripts finish, release or hand over, and never refuses a lane switch", () => {
   const OTHER = "6f1c2d3e-4a5b-4c6d-8e7f-8091a2b3c4d5";
   let ship = shipRun({ step: 4 });
-  let state = { ticket: "NJ-3321", owner: SID, status: "in_progress", pr: null };
+  let state = { ticket: "NJ-3321", locked: true, runId: SHIP_RUN, owner: SID, status: "in_progress", pr: null };
   const c = { probe: probe({ shipRun: () => ship, shipState: () => state }) };
   const joined = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3321" }, ctx(T0 + MIN, c)).state;
   assert.equal(joined.runId, SHIP_RUN);
   // Released after handover: finished again with the outcome ship's own finish reports, and the session goes back to its own run.
   ship = null;
-  state = { ticket: "NJ-3321", owner: null, status: "ready", pr: 4860 };
+  state = { ticket: "NJ-3321", locked: false, runId: null, owner: null, status: "ready", pr: 4860 };
   const done = onHook(joined, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
   const fin = done.events.find((e) => e.type === "run.finished");
   assert.deepEqual([fin.runId, fin.skill, fin.outcome, fin.prNumber], [SHIP_RUN, "ship", "ready", 4860]);
@@ -190,10 +190,10 @@ test("the plugin lets go of a ship run the scripts finish, release or hand over,
   assert.ok(later.events.every((e) => e.runId !== SHIP_RUN));
   // A takeover by another task: the run is the new owner's, so nothing is finished.
   ship = shipRun({ step: 4 });
-  state = { ticket: "NJ-3321", owner: SID, status: "in_progress", pr: null };
+  state = { ticket: "NJ-3321", locked: true, runId: SHIP_RUN, owner: SID, status: "in_progress", pr: null };
   const again = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3321" }, ctx(T0 + MIN, c)).state;
   ship = null;
-  state = { ticket: "NJ-3321", owner: "someone-else", status: "in_progress", pr: null };
+  state = { ticket: "NJ-3321", locked: true, runId: null, owner: "someone-else", status: "in_progress", pr: null };
   const taken = onHook(again, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
   assert.ok(!taken.events.some((e) => e.type === "run.finished" && e.runId === SHIP_RUN));
   assert.equal(taken.state.joined, null);
@@ -202,6 +202,17 @@ test("the plugin lets go of a ship run the scripts finish, release or hand over,
   const held = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3321" }, ctx(T0 + MIN, c)).state;
   ship = undefined;
   assert.equal(onHook(held, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c)).state.joined, SHIP_RUN);
+  // A read caught mid-heartbeat (owner.json empty, lock still there, same run) is no proof: the run stays open.
+  ship = null;
+  state = { ticket: "NJ-3321", locked: true, owner: null, runId: SHIP_RUN, status: "in_progress", pr: null };
+  const blip = onHook(held, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
+  assert.ok(!blip.events.some((e) => e.type === "run.finished"));
+  assert.equal(blip.state.joined, SHIP_RUN);
+  // An agent stage while on the ship run is only the session working, never a second card.
+  ship = shipRun({ step: 4 });
+  const explore = onReport(held, { type: "stage", stage: "agent:S2", note: "Reading the scoreboard code" }, ctx(T0 + 4 * MIN, c));
+  assert.deepEqual(brief(explore.events), ["activity.reported"]);
+  assert.equal(explore.events[0].runId, SHIP_RUN);
   // A lane switch while joined: the shepherd run is the plugin's own (a child of the ship run), and ship's steps stay off it.
   ship = shipRun({ step: 6 });
   const shep = onReport(held, { type: "stage", stage: "shepherd:S1" }, ctx(T0 + 5 * MIN, c));

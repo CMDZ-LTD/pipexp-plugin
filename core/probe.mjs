@@ -180,6 +180,9 @@ export function shipState(cwd, ticket, g = git(cwd)) {
   const doing = steps.filter((s) => s?.status === "in_progress").map((s) => Number(s.step ?? s.id)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 10);
   return {
     ticket,
+    // The lock folder itself: gone once the claim is released. Its owner.json is rewritten on every heartbeat (not
+    // atomically), so an unreadable owner proves nothing.
+    locked: existsSync(join(dir, "owner.lock")),
     owner: readJson(join(dir, "owner.lock", "owner.json"))?.task ?? null,
     runId: RUN_ID.test(state.runId ?? "") ? state.runId.toLowerCase() : null,
     status: typeof state.status === "string" ? state.status : null,

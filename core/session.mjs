@@ -310,10 +310,14 @@ const shipOutcome = (status) => {
  * sent theirs); a takeover is the new owner's. The session goes back to its own, finished, run.
  */
 function leaveShip(s, ctx, at, out) {
-  const st = ctx.probe.shipState?.(s.cwd, s.joinedTicket);
+  const st = ctx.probe.shipState?.(s.cwd, s.joinedTicket ?? s.ticket);
   if (st === undefined) return false;
-  if (!(st?.owner && st.owner !== s.sessionId)) {
-    const ship = { ...s, runId: s.joined, skill: "ship", ticket: s.joinedTicket, activity: undefined, attemptId: undefined };
+  const takenOver = !!st?.owner && st.owner !== s.sessionId;
+  // Leave only on proof: the scripts cleared or replaced the run, released the claim, or another task holds it. A read
+  // caught mid-heartbeat (an empty owner.json, a state.json being written) keeps the session on the run.
+  if (!st || !(takenOver || !st.locked || st.runId !== s.joined)) return false;
+  if (!takenOver) {
+    const ship = { ...s, runId: s.joined, skill: "ship", ticket: s.joinedTicket ?? s.ticket, activity: undefined, attemptId: undefined };
     out.push(event(ship, "run.finished", { outcome: shipOutcome(st?.status), prNumber: st?.pr ?? null }, at));
   }
   const back = s.runs?.agent && s.runs.agent !== s.joined ? s.runs.agent : uuid5("pipexp/session/" + s.sessionId);
@@ -566,6 +570,13 @@ export function onReport(state, report, ctx) {
   if (report.type === "run.finished" && fields.outcome === "blocked") activity(s, "blocked", at, "agent", ctx.content === "minimal" ? undefined : fields.question);
   if (report.type === "stage") {
     const skill = report.stage.split(":")[0];
+    // On the ship run, the plugin's own lane is not other work: an agent stage (Explore, Build) is the session working,
+    // never a second card beside the ship one.
+    if (onShip(s) && skill === "agent") {
+      activity(s, "working", at, "agent", ctx.content === "minimal" ? undefined : words(report.note));
+      out.push(event(s, "activity.reported", {}, at));
+      return { state: s, events: out };
+    }
     const moved = skill !== s.skill;
     // A claim (new, resume or takeover) is a new attempt: only the latest attempt moves the card on the board.
     if (report.claim && !onShip(s)) s.attemptId = randomUUID();
