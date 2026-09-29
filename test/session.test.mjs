@@ -168,6 +168,12 @@ test("a session the ship scripts claim reports onto their run: its own run close
   assert.equal(stop.state.activity.state, "idle");
   const end = onHook(stop.state, { ...base, hook_event_name: "SessionEnd" }, ctx(T0 + 9 * MIN, c));
   assert.ok(!end.events.some((e) => e.type === "run.finished"), "the scripts finish their own run");
+  // A second ticket claimed in the same session joins its run and never closes the first ship run.
+  ship = shipRun({ ticket: "NJ-3400", runId: "6f1c2d3e-4a5b-4c6d-8e7f-8091a2b3c4d5" });
+  const next = onHook(end.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 10 * MIN, c));
+  assert.ok(!next.events.some((e) => e.type === "run.finished"), "the first ship run is the scripts' to finish");
+  assert.equal(next.events.find((e) => e.type === "run.started").runId, "6f1c2d3e-4a5b-4c6d-8e7f-8091a2b3c4d5");
+  assert.equal(next.state.ticket, "NJ-3400");
 });
 
 test("a claim whose scripts started no run leaves the session to the plugin, and an older quiet session wakes up", () => {

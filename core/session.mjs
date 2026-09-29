@@ -311,7 +311,9 @@ function followShip(s, ctx, at, out, force = false) {
   if (!ship?.runId) return;
   if (ship.fields) s.shipFields = ship.fields;
   if (s.joined !== ship.runId) {
-    if (s.started && !s.finished && s.runId !== ship.runId) out.push(event(s, "run.finished", { outcome: "abandoned", prNumber: null }, at));
+    // Only the plugin's own run is closed: a ship run joined before (an earlier ticket) is the scripts' to finish.
+    if (s.started && !s.finished && s.runId !== ship.runId && s.runId !== s.joined) out.push(event(s, "run.finished", { outcome: "abandoned", prNumber: null }, at));
+    refresh(s, ctx);
     s.runs = { ...(s.runs ?? {}), ship: ship.runId };
     s.runId = ship.runId;
     s.skill = "ship";
@@ -325,7 +327,6 @@ function followShip(s, ctx, at, out, force = false) {
     delete s.attemptId;
     s.stage = null;
     s.joined = ship.runId;
-    refresh(s, ctx);
     out.push(event(s, "run.started", startFields(s, ctx, "resume"), at));
     s.lastSentAt = at;
   }
