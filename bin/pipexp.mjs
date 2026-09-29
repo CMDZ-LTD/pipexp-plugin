@@ -10,6 +10,8 @@
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
+//   pipexp allow ship | deny ship        let the board open a new Codex thread here to ship a ticket (off by default)
+//   pipexp ship-poll                     open the threads the board asked for (the launchd job runs this)
 //   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
@@ -24,6 +26,7 @@ import { installCursor, installOpencode, uninstallCursor } from "../core/install
 import { ask } from "../core/ask.mjs";
 import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
+import { allowShip, EVERY_S, pollShips, shipAllowed } from "../core/ship.mjs";
 import { contentFor, currentSession, explicitReport, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
@@ -114,6 +117,7 @@ async function main() {
     const w = waiting();
     out("Queued events: " + w.total + (w.total ? " (oldest " + age(w.oldestMs) + "; pipexp flush --verbose says why)" : "") + " · pipexp " + VERSION + " · newest release " + (latestKnown() ?? "unknown") + " (" + latestAge() + ")");
     out("Restart from the board: " + (restartAllowed() ? "on (pipexp deny restart turns it off)" : "off (pipexp allow restart turns it on)"));
+    out("Ship from the board: " + (shipAllowed() ? "on (pipexp deny ship turns it off)" : "off (pipexp allow ship turns it on)"));
     if (s) out("This session: " + (s.shipOwned ? "reported by the ship skill" : (s.skill + " lane, stage " + (s.stage ?? "none") + (s.ticket ? ", " + s.ticket : "") + ", " + board + "/?run=" + s.runId)));
     return;
   }
@@ -122,8 +126,22 @@ async function main() {
     if (!r.lanes) return fail("no stages: " + r.reason, 1);
     return out(values.raw ? JSON.stringify({ repo: r.repo, lanes: r.lanes }) : describe(r.lanes) + (r.from === "cache" ? "\n(from the last time the board answered)" : ""));
   }
+  if (cmd === "ship-poll") {
+    await pollShips().catch(() => {});
+    return;
+  }
+  if ((cmd === "allow" || cmd === "deny") && arg === "ship") {
+    const r = allowShip(cmd === "allow");
+    if (!r.ok) return fail(r.why, 1);
+    // The board greys Ship out until the machine's audit says it is on, so it goes now.
+    queueAudit(true);
+    await flushNow().catch(() => {});
+    if (cmd === "deny") return out("Ship is off on this machine.");
+    out("Ship is on: when you press Ship on a ticket on the board and pick this machine, a new Codex thread opens here with the prompt ready. You press Enter to start it.");
+    return out(r.why ?? "This machine asks the board every " + EVERY_S + " seconds while you are signed in.");
+  }
   if (cmd === "allow" || cmd === "deny") {
-    if (arg !== "restart") fail(cmd + " takes restart");
+    if (arg !== "restart") fail(cmd + " takes restart or ship");
     setRestart(cmd === "allow");
     // The board greys Restart out until the machine's audit says it is on, so it goes now.
     queueAudit(true);
@@ -204,7 +222,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, activity, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, allow ship, deny ship, ship-poll, disconnect, stage, activity, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

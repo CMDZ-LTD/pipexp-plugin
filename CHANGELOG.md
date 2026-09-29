@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- Ship from the board. The board's Health > Planning cards have a Ship button: its owner picks this machine, and a new Codex thread opens here in the project's checkout with `$ship <ticket>` and their note in the composer, not sent: you press Enter. Off until you run `pipexp allow ship`, which adds a launchd job (`dev.pipexp.ship`) that asks the board every 20 seconds (`GET /ship`); `pipexp deny ship` removes it. The audit reports `canShip` so the board offers only machines where it is on. The log (`state/ship.log`) names the ticket, never the prompt.
+
 ## 0.1.19 (2026-09-27)
 
 - Agent activity (CMD-518, board #520). Working, Idle, Paused, Blocked and Waiting are reported apart from the workflow stage, only to a board that advertises agent-activity-v1. At most one activity beat every 4 minutes and 300 per run, so a run stays under the board's 2,000 events. A Codex turn with no prompt (a delegated turn) is Working at its first tool call; a finish still ends the turn idle; a board stop or an explicit blocked or paused status holds until a new turn. An agent-lane session that reports its own stage waits for you at each turn's end. A PR is unlinked only when the work changes. New tool pipexp_report_status (and pipexp activity from scripts) reports a status with a reason. On a board that takes activity, each session is asked at start to report one short line of its own on what it works on (a note on the status or the stage report), kept while that work goes on; never copied from prompts, code or output, and dropped on minimal content. A machine upgraded from 0.1.18 reads the board again at its next hook. A session whose work moves to another project's repository ends its run in the old project and reports on a new run in the new one, only after the board confirmed this machine may report there; otherwise nothing is moved or sent.
