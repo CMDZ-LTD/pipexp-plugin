@@ -5,9 +5,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inCodeDir } from "./config.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const LAUNCHER = join(ROOT, "hooks", "pipexp-hook.mjs");
+// A live download (core/live.mjs) is deleted once newer ones land, so Cursor and OpenCode must point at an installed copy.
+const live = inCodeDir;
+const LIVE = "run install from the installed plugin (~/.config/pipexp/bin/pipexp install), not from a live download";
 const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "postToolUse", "postToolUseFailure", "stop", "sessionEnd"];
 const MARK = "pipexp-hook.mjs";
 
@@ -16,6 +20,7 @@ export const cursorCommand = (launcher = LAUNCHER) => "node " + quote(launcher) 
 
 /** ~/.cursor/hooks.json with PipeXP on each event PipeXP reads, replacing only an older PipeXP entry. */
 export function installCursor(home = homedir(), launcher = LAUNCHER) {
+  if (live(launcher)) return { ok: false, reason: LIVE };
   const path = join(home, ".cursor", "hooks.json");
   let config = { version: 1, hooks: {} };
   if (existsSync(path)) {
@@ -56,6 +61,7 @@ export function uninstallCursor(home = homedir()) {
 
 /** A one-line OpenCode plugin in ~/.config/opencode/plugins that loads this checkout's opencode/pipexp.mjs. */
 export function installOpencode(home = homedir(), xdg = process.env.XDG_CONFIG_HOME) {
+  if (live(ROOT)) return { ok: false, reason: LIVE };
   const dir = join(xdg || join(home, ".config"), "opencode", "plugins");
   const path = join(dir, "pipexp.js");
   mkdirSync(dir, { recursive: true });

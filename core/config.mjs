@@ -2,9 +2,9 @@
 // (PIPEXP_HOME overrides it), so Codex, Claude Code and the MCP server on one machine share one connection.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform, release } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 export const VERSION = "0.1.20";
 // PIPEXP_HOME moves everything (tests). Codex starts MCP servers with a bare environment, so the MCP server
@@ -13,6 +13,14 @@ export const home = () => process.env.PIPEXP_HOME || join(homedir(), ".config", 
 export const stateDir = () => join(home(), "state");
 /** Releases downloaded for live updates (core/live.mjs). */
 export const codeDir = () => join(home(), "code");
+/** Whether a file is inside a live download (compared as real paths: macOS's /var is /private/var). */
+export function inCodeDir(path) {
+  try {
+    return realpathSync(path).startsWith(realpathSync(codeDir()) + sep);
+  } catch {
+    return false;
+  }
+}
 
 export function readJson(path) {
   try {

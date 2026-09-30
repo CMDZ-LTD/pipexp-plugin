@@ -2,9 +2,9 @@
 // device flow (docs/plans/connect-machine-ux.md on the board repo). Change it here and nothing else moves.
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, dirname, sep } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { codeDir, credentials, home, machine, osName, readJson, saveCredentials, stateDir, VERSION, writeJson } from "./config.mjs";
+import { codeDir, credentials, home, inCodeDir, machine, osName, readJson, saveCredentials, stateDir, VERSION, writeJson } from "./config.mjs";
 import { checkUrl } from "./send.mjs";
 
 // The hosted board: its own domain (CMD-56), a custom domain on the Convex site. The old Convex address still takes
@@ -130,8 +130,10 @@ export function shimBody(cli, node, live = codeDir()) {
   return [
     "#!/bin/sh",
     "# Written by the pipexp plugin. Runs the newest version installed or downloaded, so upgrades never break it.",
+    // install and uninstall write this copy's path into Cursor and OpenCode, so never a download that gets deleted.
+    "case \"$1\" in install|uninstall) live='';; *) live=" + q(live) + ";; esac",
     // "x.y.z<tab>path" per copy. Folder names are x.y.z: numeric sort on each part works on macOS, GNU and BusyBox alike.
-    "cli=$(for d in " + q(versions) + " " + q(live) + "; do (cd \"$d\" 2>/dev/null && for f in */bin/pipexp.mjs; do [ -f \"$f\" ] && printf '%s\\t%s/%s\\n' \"${f%%/*}\" \"$d\" \"$f\"; done); done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | cut -f2-)",
+    "cli=$(for d in " + q(versions) + " \"$live\"; do [ -n \"$d\" ] && (cd \"$d\" 2>/dev/null && for f in */bin/pipexp.mjs; do [ -f \"$f\" ] && printf '%s\\t%s/%s\\n' \"${f%%/*}\" \"$d\" \"$f\"; done); done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | cut -f2-)",
     '[ -n "$cli" ] || cli=' + q(cli),
     "node=" + q(node),
     '[ -x "$node" ] || node=node',
@@ -145,7 +147,7 @@ export function installShim() {
   const dir = join(home(), "bin");
   const path = join(dir, "pipexp");
   // A live download never rewrites it: the installed copy names the folder the agent installs into.
-  if (CLI.startsWith(codeDir() + sep)) return path;
+  if (inCodeDir(CLI)) return path;
   const body = shimBody(CLI, process.execPath);
   try {
     if (existsSync(path) && readFileSync(path, "utf8") === body) return path;

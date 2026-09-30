@@ -34,32 +34,42 @@ export function liveRoot(version = VERSION) {
  * Only a whole release of that very version is kept; the one before stays, as a running server may still be on it.
  * Never throws. Tests pass their own fetch.
  */
-export async function update(get = fetch, latest = latestKnown()) {
+export async function update(get = fetch, latest = latestKnown(), now = Date.now()) {
   if (!autoUpdate() || !latest || !SEMVER.test(latest) || !newer(latest, VERSION)) return null;
   const have = current();
   if (have && !newer(latest, have)) return null;
   if (underTest() && get === fetch) return null;
+  // A download that failed is tried again after an hour, never at every flush.
+  const failed = join(codeDir(), "failed.json");
+  const last = readJson(failed);
+  if (last?.version === latest && now - last.at < 3_600_000) return null;
   const tmp = join(codeDir(), ".tmp-" + process.pid);
+  let got = null;
   try {
     const res = await get(REPO + latest, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error("download " + res.status);
     rmSync(tmp, { recursive: true, force: true });
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
     writeFileSync(tmp + ".tgz", Buffer.from(await res.arrayBuffer()));
     const x = spawnSync("tar", ["-xzf", tmp + ".tgz", "-C", tmp, "--strip-components=1"], { timeout: 30_000 });
     const whole = x.status === 0 && readJson(join(tmp, "package.json"))?.version === latest && existsSync(join(tmp, "hooks", "hook.mjs")) && existsSync(join(tmp, "mcp", "tools.mjs"));
-    if (!whole) return null;
+    if (!whole) throw new Error("not a whole release of " + latest);
     const dest = join(codeDir(), latest);
     rmSync(dest, { recursive: true, force: true });
     renameSync(tmp, dest);
-    writeJson(join(codeDir(), "current.json"), { version: latest, at: Date.now() });
+    writeJson(join(codeDir(), "current.json"), { version: latest, at: now });
     const kept = readdirSync(codeDir()).filter((d) => SEMVER.test(d)).sort((a, b) => (newer(a, b) ? -1 : 1)).slice(2);
     for (const old of kept) rmSync(join(codeDir(), old), { recursive: true, force: true });
-    return latest;
+    got = latest;
   } catch {
-    return null;
+    // Counted as failed below.
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(tmp + ".tgz", { force: true });
   }
+  try {
+    if (got) rmSync(failed, { force: true });
+    else writeJson(failed, { version: latest, at: now });
+  } catch {}
+  return got;
 }

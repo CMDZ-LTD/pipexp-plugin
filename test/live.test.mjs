@@ -58,12 +58,15 @@ function server() {
 const pluginOf = (result) => JSON.parse(result.content[0].text).plugin;
 
 test("a release is downloaded once, only whole and of the very version asked for", async () => {
+  const T = Date.now();
   const wrong = release(NEXT, (top) => writeFileSync(join(top, "package.json"), JSON.stringify({ version: "9.9.8" })));
-  assert.equal(await update(wrong.get, NEXT), null, "a tarball of another version is refused");
+  assert.equal(await update(wrong.get, NEXT, T), null, "a tarball of another version is refused");
   assert.equal(liveRoot(), null);
   assert.equal(await update(release(VERSION).get, VERSION), null, "never the version already running");
   const r = release(NEXT);
-  assert.equal(await update(r.get, NEXT), NEXT);
+  assert.equal(await update(r.get, NEXT, T + 30 * 60_000), null, "a failed download waits an hour, never retried at every flush");
+  assert.equal(r.asked.length, 0);
+  assert.equal(await update(r.get, NEXT, T + 3_600_001), NEXT);
   assert.deepEqual(r.asked, ["https://codeload.github.com/CMDZ-LTD/pipexp-plugin/tar.gz/refs/tags/v" + NEXT]);
   assert.equal(liveRoot(), join(codeDir(), NEXT));
   assert.equal(await update(r.get, NEXT), null);
@@ -109,6 +112,12 @@ test("the CLI shim runs the newest of the installed and the downloaded copies", 
   writeFileSync(shim, shimBody(join(cache, VERSION, "bin", "pipexp.mjs"), process.execPath), { mode: 0o700 });
   const run = () => execFileSync(shim, ["status"], { encoding: "utf8", env: { ...process.env, PIPEXP_HOME: home } });
   assert.match(run(), /pipexp 9\.9\.10/, "9.9.10 sorts after 9.9.9 and the installed copy");
+  // install writes a path into Cursor's hooks: the installed copy's, never a download that gets deleted.
+  const user = mkdtempSync(join(tmpdir(), "pipexp-user-"));
+  execFileSync(shim, ["install", "cursor"], { env: { ...process.env, PIPEXP_HOME: home, HOME: user } });
+  assert.match(readFileSync(join(user, ".cursor", "hooks.json"), "utf8"), new RegExp(join(cache, VERSION, "hooks", "pipexp-hook.mjs").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const direct = spawnSync(process.execPath, [join(codeDir(), "9.9.10", "bin", "pipexp.mjs"), "install", "cursor"], { encoding: "utf8", env: { ...process.env, PIPEXP_HOME: home, HOME: user } });
+  assert.match(direct.stderr, /not from a live download/);
   execFileSync(shim, ["auto-update", "off"], { env: { ...process.env, PIPEXP_HOME: home } });
   assert.equal(existsSync(codeDir()), false, "off deletes the downloads");
   assert.equal(liveRoot(), null);

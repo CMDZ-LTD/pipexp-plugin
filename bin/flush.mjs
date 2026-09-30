@@ -40,7 +40,6 @@ export async function run() {
   noteFlush(result);
   // Once an hour, whether a newer plugin is out; if so it is downloaded, and every session runs it from its next hook.
   await checkLatest();
-  await update();
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
   if (steerFor) {
@@ -58,6 +57,8 @@ export async function run() {
   }
   // A session started where this machine's copy of the lanes is old or missing (CMD-421): read them again.
   if (process.env.PIPEXP_STAGES_CWD) await stagesFor(process.env.PIPEXP_STAGES_CWD).catch(() => null);
+  // Last, so a slow download never holds up a stop from the board.
+  await update();
   return result;
 }
 
