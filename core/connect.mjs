@@ -2,9 +2,9 @@
 // device flow (docs/plans/connect-machine-ux.md on the board repo). Change it here and nothing else moves.
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { credentials, home, machine, osName, readJson, saveCredentials, stateDir, VERSION, writeJson } from "./config.mjs";
+import { codeDir, credentials, home, machine, osName, readJson, saveCredentials, stateDir, VERSION, writeJson } from "./config.mjs";
 import { checkUrl } from "./send.mjs";
 
 // The hosted board: its own domain (CMD-56), a custom domain on the Convex site. The old Convex address still takes
@@ -120,18 +120,18 @@ const clearDisconnected = () => {
 
 /**
  * The shim's script. An upgrade installs the new version in a sibling folder and deletes the old one (CMD-370), so the
- * shim never names a version: it runs the newest version folder beside the one that wrote it (sorted as versions),
- * falling back to the path it was written with, and to "node" on PATH if that node moved.
+ * shim never names a version: it runs the newest version folder beside the one that wrote it or among the live
+ * downloads (core/live.mjs), sorted as versions, falling back to the path it was written with, and to "node" on PATH
+ * if that node moved.
  */
-export function shimBody(cli, node) {
+export function shimBody(cli, node, live = codeDir()) {
   const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
   const versions = dirname(dirname(dirname(cli)));
   return [
     "#!/bin/sh",
-    "# Written by the pipexp plugin. Runs the newest installed version, so upgrades never break it.",
-    // Folder names are x.y.z: numeric sort on each part works on macOS, GNU and BusyBox sort alike.
-    "cli=$(cd " + q(versions) + " 2>/dev/null && ls -d */bin/pipexp.mjs 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)",
-    '[ -z "$cli" ] || cli=' + q(versions) + '/"$cli"',
+    "# Written by the pipexp plugin. Runs the newest version installed or downloaded, so upgrades never break it.",
+    // "x.y.z<tab>path" per copy. Folder names are x.y.z: numeric sort on each part works on macOS, GNU and BusyBox alike.
+    "cli=$(for d in " + q(versions) + " " + q(live) + "; do (cd \"$d\" 2>/dev/null && for f in */bin/pipexp.mjs; do [ -f \"$f\" ] && printf '%s\\t%s/%s\\n' \"${f%%/*}\" \"$d\" \"$f\"; done); done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | cut -f2-)",
     '[ -n "$cli" ] || cli=' + q(cli),
     "node=" + q(node),
     '[ -x "$node" ] || node=node',
@@ -144,6 +144,8 @@ export function shimBody(cli, node) {
 export function installShim() {
   const dir = join(home(), "bin");
   const path = join(dir, "pipexp");
+  // A live download never rewrites it: the installed copy names the folder the agent installs into.
+  if (CLI.startsWith(codeDir() + sep)) return path;
   const body = shimBody(CLI, process.execPath);
   try {
     if (existsSync(path) && readFileSync(path, "utf8") === body) return path;

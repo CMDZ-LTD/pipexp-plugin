@@ -64,15 +64,14 @@ export function latestAge(now = Date.now()) {
 /** True only when a released version is known and ahead of this one. */
 export const behind = (latest = latestKnown()) => !!latest && newer(latest, VERSION);
 
-/** Reads the newest release tag, once a day. Never throws; a failed read keeps what was known. Tests pass their own fetch. */
+/** Reads the newest release tag, once an hour. Never throws; a failed read keeps what was known. Tests pass their own fetch. */
 export async function checkLatest(now = Date.now(), get = fetch) {
   const file = join(stateDir(), "latest.json");
   if (underTest() && get === fetch) return latestKnown();
-  // Known to be out of date: this plugin is newer than the newest release read (read before it was tagged). Read again,
-  // at most once an hour, so status never calls an old release the newest (CMD-370).
+  // Hourly, so a release reaches every machine within the hour (core/live.mjs), and status never calls an old release
+  // the newest for long (CMD-370).
   const known = readJson(file);
-  const wait = known?.version && newer(VERSION, known.version) ? HOUR : DAY;
-  if (now - (known?.at ?? 0) < wait) return latestKnown();
+  if (now - (known?.at ?? 0) < HOUR) return latestKnown();
   try {
     const res = await get(RELEASES, { headers: { accept: "application/vnd.github+json", "user-agent": "pipexp-plugin" }, signal: AbortSignal.timeout(5000) });
     const tags = res.ok ? await res.json() : [];

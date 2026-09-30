@@ -10,7 +10,7 @@ import { freshHome } from "./helpers.mjs";
 const home = freshHome();
 process.env.PIPEXP_RUNTIME = "codex";
 const { hook } = await import("../core/run.mjs");
-const { finishProblem } = await import("../mcp/server.mjs");
+const { finishProblem } = await import("../mcp/tools.mjs");
 const contract = JSON.parse(readFileSync(new URL("./fixtures/board-contract.json", import.meta.url), "utf8"))["run.finished"];
 const OUTCOMES = ["ready", "merged", "blocked", "abandoned"];
 

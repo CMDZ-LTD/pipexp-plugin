@@ -11,6 +11,7 @@ import { lookUpPr } from "../core/pr.mjs";
 import { fetchSteers } from "../core/steer.mjs";
 import { stagesFor } from "../core/stages.mjs";
 import { carryOutRestarts } from "../core/run.mjs";
+import { update } from "../core/live.mjs";
 
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
@@ -37,8 +38,9 @@ export async function run() {
   sweepIdle();
   const result = await flush((event) => sendOne(creds, event));
   noteFlush(result);
-  // Once a day, whether a newer plugin is out, so status can say when an upgrade would help.
+  // Once an hour, whether a newer plugin is out; if so it is downloaded, and every session runs it from its next hook.
   await checkLatest();
+  await update();
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
   if (steerFor) {

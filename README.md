@@ -24,6 +24,9 @@ Then open `/hooks` in Codex and trust PipeXP's hooks (Codex asks once; updates k
 so they do not ask again). Start a session: a browser tab opens at pipexp.dev/connect with a code. Check the
 code, click **Connect**, and the session is on your board. Over SSH, run `pipexp connect` and open the link it prints.
 
+New releases install themselves: within an hour of a release, sessions already open run it too, with no restart.
+`pipexp auto-update off` turns that off.
+
 ## Install (Claude Code)
 
 ```text
@@ -80,13 +83,14 @@ its id, so a resend is never counted twice.
 ## Files
 
 Everything lives in `~/.config/pipexp` (`PIPEXP_HOME` overrides it): `credentials.json` (the key, mode 600),
-`machine.json`, `settings.json`, `state/` (sessions, outbox, errors log), `bin/pipexp` (a stable path to the CLI).
+`machine.json`, `settings.json`, `state/` (sessions, outbox, errors log), `bin/pipexp` (a stable path to the CLI),
+`code/` (new releases, downloaded for live updates).
 Key lookup order: `PIPEXP_URL` + `PIPEXP_KEY` env (CI), then `credentials.json`, then the older `~/.config/nudj/telemetry.env` (kept so machines set up before PipeXP had its own name keep reporting).
 
 ## Commands
 
 ```text
-pipexp connect | status | disconnect | flush | preview [--all] [--raw] | allow restart | deny restart | content standard|minimal
+pipexp connect | status | disconnect | flush | preview [--all] [--raw] | allow restart | deny restart | content standard|minimal | auto-update on|off
 pipexp stages [--raw]          this repo's lanes and stage ids, from the board (cached for offline)
 pipexp stage <lane:S<n>> [--ticket ABC-12] [--counters '{...}'] [--replay]
 pipexp event <type> --json '{...}'

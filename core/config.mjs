@@ -11,6 +11,8 @@ export const VERSION = "0.1.20";
 // always uses the default folder: keep real connections in credentials.json, not in env.
 export const home = () => process.env.PIPEXP_HOME || join(homedir(), ".config", "pipexp");
 export const stateDir = () => join(home(), "state");
+/** Releases downloaded for live updates (core/live.mjs). */
+export const codeDir = () => join(home(), "code");
 
 export function readJson(path) {
   try {

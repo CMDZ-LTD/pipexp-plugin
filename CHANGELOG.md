@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- Updates without a restart. Each machine checks for a new release every hour and downloads it into `~/.config/pipexp/code/<version>`; from then on every hook, every MCP call (in servers already running) and the `pipexp` command run the new code. Before, a release reached a session only after Codex or Claude Code was restarted. The hook command and hooks.json stay the same, so nothing asks to be trusted again. A download is used only when it is the whole release of the version asked for, and one that does not load falls back to the installed copy. `pipexp auto-update off` turns it off and deletes the downloads. This one version still needs a restart to take effect; later ones do not.
+
 ## 0.1.20 (2026-09-30)
 
 - A ship run keeps moving on the board (Derek, 29 Sep: four cards sat at Take the ticket for up to 2 hours). Once a repo's ship scripts claim a session, the plugin no longer goes quiet: it closes its own run once (no second, stuck card), then reports onto the scripts' run: the session's activity, its PR, the agent's own stage reports, and the ship step `state.json` has in progress (checked at turn edges and at most once a minute, never moving the card back). The scripts' title, profile and branch are kept, and only they finish the run. A claim whose scripts started no run (telemetry off) no longer silences the session: the plugin reports it as its own.
