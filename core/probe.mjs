@@ -129,6 +129,8 @@ export function githubLogin() {
 /**
  * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
+ * A session can hold more than one (a ticket claimed, then left for another): the one whose state.json names this
+ * worktree wins, so the card follows the ticket being worked on (NJ-3331 joined a stale NJ-3256 claim, CMD-535).
  */
 export function shipClaim(cwd, sessionId, g = git(cwd)) {
   if (!g?.common || !g.top) return null;
@@ -140,13 +142,15 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
   } catch {
     return null;
   }
+  const held = [];
   for (const ticket of tickets) {
     try {
       const owner = JSON.parse(readFileSync(join(root, ticket, "owner.lock", "owner.json"), "utf8"));
-      if (owner.task === sessionId) return ticket;
+      if (owner.task === sessionId) held.push(ticket);
     } catch {}
   }
-  return null;
+  if (held.length < 2) return held[0] ?? null;
+  return held.find((ticket) => readJson(join(root, ticket, "state.json"))?.worktree === g.top) ?? held[0];
 }
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

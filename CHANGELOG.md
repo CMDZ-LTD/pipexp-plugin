@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A session holding two ship claims (a ticket claimed, then left for another) follows the ticket it works on: the one whose ship state names its worktree. Before, it joined whichever claim it found first, so NJ-3331's chat reported onto NJ-3256's card (CMD-535).
+
 ## 0.1.21 (2026-09-30)
 
 - Updates without a restart. Each machine checks for a new release every hour and downloads it into `~/.config/pipexp/code/<version>`; from then on every hook, every MCP call (in servers already running) and the `pipexp` command run the new code. Before, a release reached a session only after Codex or Claude Code was restarted. The hook command and hooks.json stay the same, so nothing asks to be trusted again. A download is used only when it is the whole release of the version asked for, and one that does not load falls back to the installed copy. `pipexp auto-update off` turns it off and deletes the downloads. This one version still needs a restart to take effect; later ones do not.
