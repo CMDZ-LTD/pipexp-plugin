@@ -164,11 +164,10 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
     const [key, n] = ticket.toLowerCase().split("-");
     return new RegExp("(^|[^a-z0-9])" + key + "[-_]?" + n + "(?![0-9])").test(String(g.branch ?? "").toLowerCase());
   };
-  return (
-    held.find((ticket) => { const w = readJson(join(root, ticket, "state.json"))?.worktree; return typeof w === "string" && real(w) === top; }) ??
-    held.find(named) ??
-    held[0]
-  );
+  // The claims naming this worktree (all of them when none does), then the one the branch names among those.
+  const here = held.filter((ticket) => { const w = readJson(join(root, ticket, "state.json"))?.worktree; return typeof w === "string" && real(w) === top; });
+  const pool = here.length ? here : held;
+  return pool.find(named) ?? pool[0];
 }
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
