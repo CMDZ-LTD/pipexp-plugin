@@ -1,7 +1,7 @@
 // What a hook reads from the machine: git, Codex's thread names, a ship skill's claims. All fail soft.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, normalize } from "node:path";
 
@@ -130,7 +130,8 @@ export function githubLogin() {
  * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
  * A session can hold more than one (a ticket claimed, then left for another): the one whose state.json names this
- * worktree wins, so the card follows the ticket being worked on (NJ-3331 joined a stale NJ-3256 claim, CMD-535).
+ * worktree wins, then the one named in the branch, so the card follows the ticket being worked on (NJ-3331 joined a
+ * stale NJ-3256 claim, CMD-535).
  */
 export function shipClaim(cwd, sessionId, g = git(cwd)) {
   if (!g?.common || !g.top) return null;
@@ -150,7 +151,20 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
     } catch {}
   }
   if (held.length < 2) return held[0] ?? null;
-  return held.find((ticket) => readJson(join(root, ticket, "state.json"))?.worktree === g.top) ?? held[0];
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const top = real(g.top);
+  const squash = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (
+    held.find((ticket) => { const w = readJson(join(root, ticket, "state.json"))?.worktree; return typeof w === "string" && real(w) === top; }) ??
+    held.find((ticket) => squash(g.branch).includes(squash(ticket))) ??
+    held[0]
+  );
 }
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

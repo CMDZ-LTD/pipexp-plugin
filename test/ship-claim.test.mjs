@@ -20,7 +20,10 @@ test("CMD-535: a session holding two claims follows the ticket whose state names
   // Claimed first, then left for NJ-3331: no worktree of its own.
   claim("NJ-3256", { status: "claimed" });
   assert.equal(shipClaim(top, "s-1", g), "NJ-3256", "one claim: that one");
-  claim("NJ-3331", { status: "in_progress", worktree: top });
+  claim("NJ-3331", { status: "in_progress", worktree: top + "/" });
   assert.equal(shipClaim(top, "s-1", g), "NJ-3331");
   assert.equal(shipClaim(top, "s-2", g), null, "another session's claims are not this one's");
+  // No worktree in its state: the branch names it (nj3331-group-d is NJ-3331's).
+  claim("NJ-3331", { status: "in_progress" });
+  assert.equal(shipClaim(top, "s-1", { ...g, branch: "nj3331-group-d" }), "NJ-3331");
 });
