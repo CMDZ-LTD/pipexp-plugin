@@ -10,6 +10,7 @@
 //   pipexp ask "<question>" [--context ...] [--option A --option B] [--recipient <github login>] [--timeout-min 60]
 //   pipexp content standard|minimal      how much the board sees (minimal: no titles or branches)
 //   pipexp allow restart | deny restart  let the board restart this machine's runs on another model (off by default)
+//   pipexp auto-update on|off            run each new release as soon as it is out, with no agent restart (on by default)
 //   pipexp preview [--all] [--raw]       what this session sends next, after scrubbing and the content level (--all: every session)
 //   pipexp flush                         send what is queued now
 //   pipexp install cursor|opencode       add PipeXP to Cursor or OpenCode (Codex, Claude Code, Gemini CLI install the plugin)
@@ -24,6 +25,7 @@ import { installCursor, installOpencode, uninstallCursor } from "../core/install
 import { ask } from "../core/ask.mjs";
 import { droppedCount, pending, queued, waiting } from "../core/queue.mjs";
 import { restartAllowed, setRestart } from "../core/restart.mjs";
+import { setAutoUpdate } from "../core/live.mjs";
 import { contentFor, currentSession, explicitReport, loadSession, report, runtimeOf } from "../core/run.mjs";
 import { join } from "node:path";
 import { run as flushNow } from "./flush.mjs";
@@ -132,6 +134,13 @@ async function main() {
       ? "Restart is on: the owner of this machine's key can restart its runs on another model from the board, in the same folder and mode."
       : "Restart is off on this machine.");
   }
+  if (cmd === "auto-update") {
+    if (arg !== "on" && arg !== "off") fail("auto-update takes on or off");
+    setAutoUpdate(arg === "on");
+    return out(arg === "on"
+      ? "Auto-update is on: each new release runs within the hour, in sessions already open too."
+      : "Auto-update is off and the downloaded releases are deleted. Updates now come only through your agent's plugin upgrade.");
+  }
   if (cmd === "preview") {
     // Nothing is sent here: the outbox already holds each event as it will go, scrubbed and cut to the content level.
     const id = values.all ? null : (values.session ?? currentSession());
@@ -204,7 +213,7 @@ async function main() {
     if (r.status === "answered") return out(r.answer);
     return fail(r.reason ?? "no answer; ask in the chat instead", 3);
   }
-  fail("commands: connect, status, stages, preview, allow restart, deny restart, disconnect, stage, activity, event, ask, content, flush, install, uninstall");
+  fail("commands: connect, status, stages, preview, allow restart, deny restart, auto-update, disconnect, stage, activity, event, ask, content, flush, install, uninstall");
 }
 
 main().catch(() => process.exit(0));

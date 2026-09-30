@@ -18,7 +18,12 @@ Codex first, Claude Code next, then other harnesses. Changes land through a pull
 - Never add a `hooks` key to `.claude-plugin/plugin.json`: Claude loads it
   as well as the default file, and every event is sent twice. `runtimeOf()` in `core/run.mjs` tells the harnesses apart
   (PLUGIN_ROOT is Codex only; a CODEX_THREAD_ID leaks into a Claude started from a Codex terminal).
-- `mcp/server.mjs` (stdio MCP, no SDK) and `bin/pipexp.mjs` (CLI) are thin over core.
+- `mcp/tools.mjs` (the MCP tools) and `bin/pipexp.mjs` (CLI) are thin over core.
+- Live updates (`core/live.mjs`): the flush downloads each new release tag into `~/.config/pipexp/code/<version>`, and
+  the launchers run the newest copy, so a release reaches running sessions with no agent restart. `hooks/pipexp-hook.mjs`
+  loads `hooks/hook.mjs`, `mcp/server.mjs` (the stdio protocol only, never restarted) loads `mcp/tools.mjs` (`TOOLS`,
+  `reply`) at each call, and the `~/.config/pipexp/bin/pipexp` shim picks the newest `bin/pipexp.mjs`. Those paths and
+  exports are a contract with every installed launcher: never rename them, and keep the launchers tiny.
 - No npm dependencies. Node 18+. Hooks must never block or fail: write to the outbox, kick `bin/flush.mjs` detached, exit 0.
 
 ## The board contract

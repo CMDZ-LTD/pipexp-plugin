@@ -11,6 +11,7 @@ import { lookUpPr } from "../core/pr.mjs";
 import { fetchSteers } from "../core/steer.mjs";
 import { stagesFor } from "../core/stages.mjs";
 import { carryOutRestarts } from "../core/run.mjs";
+import { update } from "../core/live.mjs";
 
 export async function sendOne(creds, event) {
   if (event.type === "machine.audit") {
@@ -37,7 +38,7 @@ export async function run() {
   sweepIdle();
   const result = await flush((event) => sendOne(creds, event));
   noteFlush(result);
-  // Once a day, whether a newer plugin is out, so status can say when an upgrade would help.
+  // Once an hour, whether a newer plugin is out; if so it is downloaded, and every session runs it from its next hook.
   await checkLatest();
   // A hook that found this session due a steer check named it here (CMD-80).
   const steerFor = process.env.PIPEXP_STEER_SESSION;
@@ -56,6 +57,8 @@ export async function run() {
   }
   // A session started where this machine's copy of the lanes is old or missing (CMD-421): read them again.
   if (process.env.PIPEXP_STAGES_CWD) await stagesFor(process.env.PIPEXP_STAGES_CWD).catch(() => null);
+  // Last, so a slow download never holds up a stop from the board.
+  await update();
   return result;
 }
 

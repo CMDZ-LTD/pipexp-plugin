@@ -204,9 +204,11 @@ test("CMD-370: a release list read before this plugin was tagged is read again w
   assert.equal(asked.length, 0);
   assert.equal(await checkLatest(T + 3_600_001, tags), VERSION, "read again: this plugin is now the newest known");
   assert.equal(asked.length, 1);
-  // Up to date again: back to once a day.
-  await checkLatest(T + 3 * 3_600_000, tags);
+  // Read hourly either way, so a release reaches every machine within the hour (core/live.mjs).
+  await checkLatest(T + 3_600_001 + 30 * 60_000, tags);
   assert.equal(asked.length, 1);
+  await checkLatest(T + 3 * 3_600_000, tags);
+  assert.equal(asked.length, 2);
   writeFileSync(join(state, "latest.json"), "null");
   assert.equal(latestAge(T), "never read");
 });
