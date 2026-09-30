@@ -26,4 +26,7 @@ test("CMD-535: a session holding two claims follows the ticket whose state names
   // No worktree in its state: the branch names it (nj3331-group-d is NJ-3331's).
   claim("NJ-3331", { status: "in_progress" });
   assert.equal(shipClaim(top, "s-1", { ...g, branch: "nj3331-group-d" }), "NJ-3331");
+  // A ticket whose number is a prefix of the branch's is not the one named.
+  claim("NJ-333", { status: "claimed" });
+  assert.equal(shipClaim(top, "s-1", { ...g, branch: "codex/nj-3331-fix" }), "NJ-3331");
 });

@@ -159,10 +159,14 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
     }
   };
   const top = real(g.top);
-  const squash = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // NJ-3331 in codex/nj-3331-x or nj3331-group-d, never inside nj-33310.
+  const named = (ticket) => {
+    const [key, n] = ticket.toLowerCase().split("-");
+    return new RegExp("(^|[^a-z0-9])" + key + "[-_]?" + n + "(?![0-9])").test(String(g.branch ?? "").toLowerCase());
+  };
   return (
     held.find((ticket) => { const w = readJson(join(root, ticket, "state.json"))?.worktree; return typeof w === "string" && real(w) === top; }) ??
-    held.find((ticket) => squash(g.branch).includes(squash(ticket))) ??
+    held.find(named) ??
     held[0]
   );
 }
