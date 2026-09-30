@@ -169,8 +169,10 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
   if (states.includes(null)) return null;
   // The claims naming this worktree (all of them when none does), then the one the branch names among those.
   const here = held.filter((ticket, i) => { const w = states[i].worktree; return typeof w === "string" && real(w) === top; });
-  const pool = here.length ? here : held;
-  return pool.find(named) ?? pool[0];
+  if (here.length === 1) return here[0];
+  // Only a single clear pick: otherwise (a detached HEAD, a branch naming neither) the session stays where it is.
+  const named1 = (here.length ? here : held).filter(named);
+  return named1.length === 1 ? named1[0] : null;
 }
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
