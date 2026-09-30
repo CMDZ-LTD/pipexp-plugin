@@ -224,6 +224,26 @@ test("the plugin lets go of a ship run the scripts finish, release or hand over,
   void OTHER;
 });
 
+test("CMD-535: a session on a stale claim's run moves to the ticket it now works on, and leaves the old run alone", () => {
+  const STALE = "d68a5dc3-d7ff-464b-9847-442dea379adc";
+  let ship = shipRun({ ticket: "NJ-3256", runId: STALE, step: 4 });
+  // NJ-3256 stays claimed by this session, locked, same run: no proof to leave it.
+  let owner = SID;
+  const c = { probe: probe({ shipRun: () => ship, shipState: () => ({ ticket: "NJ-3256", locked: true, runId: STALE, owner, status: "claimed", pr: null }) }) };
+  const onStale = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3256" }, ctx(T0 + MIN, c)).state;
+  assert.equal(onStale.runId, STALE);
+  ship = shipRun({ ticket: "NJ-3331", step: 4 });
+  // The old claim's owner.json caught mid-rewrite: no move on that read.
+  owner = null;
+  assert.equal(onHook(onStale, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c)).state.runId, STALE);
+  owner = SID;
+  const r = onHook(onStale, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
+  assert.equal(r.state.runId, SHIP_RUN);
+  assert.equal(r.state.joinedTicket, "NJ-3331");
+  assert.ok(!r.events.some((e) => e.runId === STALE), "nothing sent to the old run: the scripts finish it");
+  assert.ok(r.events.some((e) => e.type === "run.started" && e.runId === SHIP_RUN && e.ticket === "NJ-3331"));
+});
+
 test("a joined start under minimal content names nobody and no branch", () => {
   const c = { content: "minimal", probe: probe({ shipRun: () => shipRun(), shipState: () => null }) };
   const r = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], { content: "minimal", probe: probe() }).state, { type: "stage", stage: "ship:S2", ticket: "NJ-3321" }, ctx(T0 + MIN, c));

@@ -1,7 +1,7 @@
 // What a hook reads from the machine: git, Codex's thread names, a ship skill's claims. All fail soft.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, normalize } from "node:path";
 
@@ -129,6 +129,9 @@ export function githubLogin() {
 /**
  * The ticket this session holds a ship claim on, while the ship skill still sends its own telemetry
  * (its claim-run.sh writes <git common dir>/ship/<ticket>/owner.lock/owner.json with the Codex task id).
+ * A session can hold more than one (a ticket claimed, then left for another): the one whose state.json names this
+ * worktree wins, then the one named in the branch, so the card follows the ticket being worked on (NJ-3331 joined a
+ * stale NJ-3256 claim, CMD-535).
  */
 export function shipClaim(cwd, sessionId, g = git(cwd)) {
   if (!g?.common || !g.top) return null;
@@ -140,13 +143,36 @@ export function shipClaim(cwd, sessionId, g = git(cwd)) {
   } catch {
     return null;
   }
+  const held = [];
   for (const ticket of tickets) {
     try {
       const owner = JSON.parse(readFileSync(join(root, ticket, "owner.lock", "owner.json"), "utf8"));
-      if (owner.task === sessionId) return ticket;
+      if (owner.task === sessionId) held.push(ticket);
     } catch {}
   }
-  return null;
+  if (held.length < 2) return held[0] ?? null;
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const top = real(g.top);
+  // NJ-3331 in codex/nj-3331-x or nj3331-group-d, never inside nj-33310.
+  const named = (ticket) => {
+    const [key, n] = ticket.toLowerCase().split("-");
+    return new RegExp("(^|[^a-z0-9])" + key + "[-_]?" + n + "(?![0-9])").test(String(g.branch ?? "").toLowerCase());
+  };
+  // A state.json caught mid-write decides nothing: no pick this time, and the session stays where it is.
+  const states = held.map((ticket) => readJson(join(root, ticket, "state.json")));
+  if (states.includes(null)) return null;
+  // The claims naming this worktree (all of them when none does), then the one the branch names among those.
+  const here = held.filter((ticket, i) => { const w = states[i].worktree; return typeof w === "string" && real(w) === top; });
+  if (here.length === 1) return here[0];
+  // Only a single clear pick: otherwise (a detached HEAD, a branch naming neither) the session stays where it is.
+  const named1 = (here.length ? here : held).filter(named);
+  return named1.length === 1 ? named1[0] : null;
 }
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
