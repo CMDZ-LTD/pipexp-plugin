@@ -356,7 +356,8 @@ function followShip(s, ctx, at, out, force = false) {
   if (s.joined && (ship?.runId !== s.joined) && !leaveShip(s, ctx, at, out)) {
     // Still this session's, but it now works another ticket it also claimed (CMD-535: NJ-3331's chat stayed on its
     // stale NJ-3256 claim): it moves across, and the old run stays the scripts' to finish. Otherwise it stays put.
-    if (!ship?.runId || ship.ticket === s.joinedTicket) return;
+    // Only on a clean read that the old claim is still ours: an owner.json caught mid-rewrite proves nothing.
+    if (!ship?.runId || ship.ticket === s.joinedTicket || ctx.probe.shipState?.(s.cwd, s.joinedTicket)?.owner !== s.sessionId) return;
     if (s.runId === s.joined) s.finished = true;
     if (s.runs?.ship === s.joined) delete s.runs.ship;
     s.joined = null;

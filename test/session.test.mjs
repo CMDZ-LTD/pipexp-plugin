@@ -228,10 +228,15 @@ test("CMD-535: a session on a stale claim's run moves to the ticket it now works
   const STALE = "d68a5dc3-d7ff-464b-9847-442dea379adc";
   let ship = shipRun({ ticket: "NJ-3256", runId: STALE, step: 4 });
   // NJ-3256 stays claimed by this session, locked, same run: no proof to leave it.
-  const c = { probe: probe({ shipRun: () => ship, shipState: () => ({ ticket: "NJ-3256", locked: true, runId: STALE, owner: SID, status: "claimed", pr: null }) }) };
+  let owner = SID;
+  const c = { probe: probe({ shipRun: () => ship, shipState: () => ({ ticket: "NJ-3256", locked: true, runId: STALE, owner, status: "claimed", pr: null }) }) };
   const onStale = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3256" }, ctx(T0 + MIN, c)).state;
   assert.equal(onStale.runId, STALE);
   ship = shipRun({ ticket: "NJ-3331", step: 4 });
+  // The old claim's owner.json caught mid-rewrite: no move on that read.
+  owner = null;
+  assert.equal(onHook(onStale, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c)).state.runId, STALE);
+  owner = SID;
   const r = onHook(onStale, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
   assert.equal(r.state.runId, SHIP_RUN);
   assert.equal(r.state.joinedTicket, "NJ-3331");
