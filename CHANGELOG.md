@@ -4,7 +4,7 @@ Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
 ## Unreleased
 
-- A session holding two ship claims (a ticket claimed, then left for another) follows the ticket it works on: the one whose ship state names its worktree. Before, it joined whichever claim it found first, so NJ-3331's chat reported onto NJ-3256's card (CMD-535).
+- A session holding two ship claims (a ticket claimed, then left for another) follows the ticket it works on: the one whose ship state names its worktree. Before, it joined whichever claim it found first, so NJ-3331's chat reported onto NJ-3256's card, and stayed there (CMD-535). A session already on a stale claim's run moves across; the old run stays the scripts' to finish.
 
 ## 0.1.21 (2026-09-30)
 
