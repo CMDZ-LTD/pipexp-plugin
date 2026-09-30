@@ -33,4 +33,7 @@ test("CMD-535: a session holding two claims follows the ticket whose state names
   claim("NJ-3256", { status: "claimed", worktree: top });
   claim("NJ-3331", { status: "in_progress", worktree: top });
   assert.equal(shipClaim(top, "s-1", { ...g, branch: "codex/nj-3331-fix" }), "NJ-3331");
+  // A state.json caught mid-write: no pick at all, rather than the wrong one.
+  writeFileSync(join(common, "ship", "NJ-3331", "state.json"), '{"status":"in_pr');
+  assert.equal(shipClaim(top, "s-1", { ...g, branch: "codex/nj-3331-fix" }), null);
 });
