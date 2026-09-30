@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.21 (2026-09-30)
 
 - Updates without a restart. Each machine checks for a new release every hour and downloads it into `~/.config/pipexp/code/<version>`; from then on every hook, every MCP call (in servers already running) and the `pipexp` command run the new code. Before, a release reached a session only after Codex or Claude Code was restarted. The hook command and hooks.json stay the same, so nothing asks to be trusted again. A download is used only when it is the whole release of the version asked for, and one that does not load falls back to the installed copy. `pipexp auto-update off` turns it off and deletes the downloads. This one version still needs a restart to take effect; later ones do not.
 
