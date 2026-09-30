@@ -1,7 +1,7 @@
 // Live updates (core/live.mjs): a new release reaches sessions already running, with no restart of the agent.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -64,6 +64,9 @@ test("a release is downloaded once, only whole and of the very version asked for
   assert.equal(liveRoot(), null);
   assert.equal(await update(release(VERSION).get, VERSION), null, "never the version already running");
   const r = release(NEXT);
+  writeFileSync(join(codeDir(), "update.lock"), "1");
+  assert.equal(await update(r.get, NEXT, T + 3_600_001), null, "another flush is downloading it");
+  rmSync(join(codeDir(), "update.lock"));
   assert.equal(await update(r.get, NEXT, T + 30 * 60_000), null, "a failed download waits an hour, never retried at every flush");
   assert.equal(r.asked.length, 0);
   assert.equal(await update(r.get, NEXT, T + 3_600_001), NEXT);

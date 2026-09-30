@@ -3,7 +3,7 @@
 // the CLI shim are thin launchers that run the newest of that and the copy the agent installed (liveRoot).
 // pipexp auto-update off turns it off and deletes the downloads.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { codeDir, home, readJson, underTest, VERSION, writeJson } from "./config.mjs";
 import { latestKnown, newer } from "./health.mjs";
@@ -43,6 +43,19 @@ export async function update(get = fetch, latest = latestKnown(), now = Date.now
   const failed = join(codeDir(), "failed.json");
   const last = readJson(failed);
   if (last?.version === latest && now - last.at < 3_600_000) return null;
+  // One download at a time per machine; a lock older than two minutes is from a flush that died.
+  const lock = join(codeDir(), "update.lock");
+  try {
+    mkdirSync(codeDir(), { recursive: true, mode: 0o700 });
+    writeFileSync(lock, String(process.pid), { flag: "wx" });
+  } catch {
+    try {
+      if (Date.now() - statSync(lock).mtimeMs < 120_000) return null;
+      writeFileSync(lock, String(process.pid));
+    } catch {
+      return null;
+    }
+  }
   const tmp = join(codeDir(), ".tmp-" + process.pid);
   let got = null;
   try {
@@ -66,6 +79,7 @@ export async function update(get = fetch, latest = latestKnown(), now = Date.now
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(tmp + ".tgz", { force: true });
+    rmSync(lock, { force: true });
   }
   try {
     if (got) rmSync(failed, { force: true });
