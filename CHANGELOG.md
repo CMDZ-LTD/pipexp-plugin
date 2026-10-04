@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.24 (2026-10-04)
 
 - A chat on a ship run that reports another ticket no longer relabels that ship card (CMD-535, 4 Oct: NJ-3323's chat looked into NJ-3449 and reported NJ-3449 onto NJ-3323's run). It now reports that ticket on its own run, and the claim's run stays with the ship scripts. It goes back onto the ship run when it names the claimed ticket again or runs ship's claim script. A chat already left in this state moves off at its next hook.
 
