@@ -62,3 +62,11 @@ test("other runtimes' transcripts are left alone", () => {
   const r = onHook(s, { session_id: "abc", cwd: "/repo", transcript_path: "/t.jsonl", ...tool, turn_id: "t2" }, ctx(T0 + MIN));
   assert.equal(r.state.turnId, "t2");
 });
+test("a subagent's tool call after the chat's turn ended does not reopen it", () => {
+  let s = withSubagent();
+  s = run(s, parent({ hook_event_name: "Stop", turn_id: "t1" }, 5 * MIN)).state;
+  assert.equal(s.activity.state, "idle");
+  const r = run(s, child({ ...tool, turn_id: "s1" }, 6 * MIN));
+  assert.equal(r.state.activity.state, "idle", "the chat waits for its person, whatever a subagent still does");
+  assert.deepEqual(r.events, []);
+});

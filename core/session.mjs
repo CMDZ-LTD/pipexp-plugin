@@ -410,9 +410,10 @@ export function onHook(state, input, ctx) {
   if (!input?.session_id) return { state, events: [] };
   if (name === "PrFound" && !state) return { state, events: [] };
   // A subagent's hooks belong to its parent's turn: its own turn, transcript, prompt and Stop are not the session's. Its
-  // tool calls still show the session working; its other hooks change nothing.
+  // tool calls show the session working, but only while its own turn does: a subagent still going after the chat's Stop
+  // must not reopen it (its own Stop is ignored too). Its other hooks change nothing.
   if (subagentPath(input.transcript_path, input.session_id)) {
-    if (!state || (name !== "PostToolUse" && name !== "PostToolUseFailure")) return { state, events: [] };
+    if (!state || state.activity?.state !== "working" || (name !== "PostToolUse" && name !== "PostToolUseFailure")) return { state, events: [] };
     const { transcript_path, turn_id, ...rest } = input;
     input = { ...rest, ...(state.turnId && { turn_id: state.turnId }) };
   }
