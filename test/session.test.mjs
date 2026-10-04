@@ -560,3 +560,37 @@ test("CMD-452: a session that moves to a branch with no ticket sends ticket: nul
   const plain = play([[0, { hook_event_name: "SessionStart", source: "startup" }]], c).events.find((e) => e.type === "run.started");
   assert.ok(!("ticket" in plain));
 });
+test("CMD-535: an agent on a ship run that names another ticket works it on its own run; the ship card keeps its ticket", () => {
+  // NJ-3323's chat, 4 Oct: still holding NJ-3323's claim, it looked into NJ-3449 and reported that ticket onto NJ-3323's
+  // ship run, which would relabel NJ-3323's card as NJ-3449 beside NJ-3449's own.
+  const ship = shipRun({ ticket: "NJ-3323", step: 4 });
+  const c = { probe: probe({ shipRun: () => ship, shipState: () => ({ ticket: "NJ-3323", locked: true, runId: SHIP_RUN, owner: SID, status: "draft-owner-blocked", pr: null }) }) };
+  const joined = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3323" }, ctx(T0 + MIN, c)).state;
+  assert.equal(joined.runId, SHIP_RUN);
+  const r = onReport(joined, { type: "activity", state: "working", note: "Checking why PR 4945 stayed a draft", ticket: "NJ-3449" }, ctx(T0 + 2 * MIN, c));
+  assert.ok(!r.events.some((e) => e.runId === SHIP_RUN), "nothing about NJ-3449 lands on NJ-3323's run");
+  assert.notEqual(r.state.runId, SHIP_RUN);
+  assert.equal(r.state.ticket, "NJ-3449");
+  assert.ok(r.events.some((e) => e.type === "run.started" && e.runId === r.state.runId && e.ticket === "NJ-3449"));
+  // The claim is still this session's, but it is not joined again at the next turn edge or report.
+  const stop = onHook(r.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 4 * MIN, c));
+  assert.equal(stop.state.runId, r.state.runId);
+  assert.ok(!stop.events.some((e) => e.runId === SHIP_RUN));
+  const report = onReport(stop.state, { type: "stage", stage: "agent:S2" }, ctx(T0 + 5 * MIN, c));
+  assert.ok(!report.events.some((e) => e.runId === SHIP_RUN));
+  // Back on NJ-3323 (named, or ship's claim script run again): the ship run again.
+  const back = onReport(report.state, { type: "stage", stage: "ship:S5", ticket: "NJ-3323" }, ctx(T0 + 6 * MIN, c));
+  assert.equal(back.state.runId, SHIP_RUN);
+  const claim = onHook(report.state, { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3323 " + SID } }, ctx(T0 + 6 * MIN, c));
+  assert.equal(claim.state.runId, SHIP_RUN);
+});
+test("CMD-535: a session 0.1.23 left on a ship run under another ticket moves off it at its next hook", () => {
+  const ship = shipRun({ ticket: "NJ-3323", step: 4 });
+  const c = { probe: probe({ shipRun: () => ship, shipState: () => ({ ticket: "NJ-3323", locked: true, runId: SHIP_RUN, owner: SID, status: "claimed", pr: null }) }) };
+  const joined = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S4", ticket: "NJ-3323" }, ctx(T0 + MIN, c)).state;
+  const stale = { ...joined, ticket: "NJ-3449" };
+  const r = onHook(stale, { ...base, hook_event_name: "Stop" }, ctx(T0 + 3 * MIN, c));
+  assert.ok(!r.events.some((e) => e.runId === SHIP_RUN));
+  assert.notEqual(r.state.runId, SHIP_RUN);
+  assert.ok(r.events.some((e) => e.type === "run.started" && e.ticket === "NJ-3449"));
+});

@@ -337,6 +337,28 @@ function leaveShip(s, ctx, at, out) {
 }
 
 /**
+ * The agent names a ticket other than the ship claim it reports onto (CMD-535, 4 Oct: NJ-3323's chat looked into
+ * NJ-3449 and reported it onto NJ-3323's ship run, relabelling that card). That is other work: the session goes back to
+ * its own run for it, the claim's run stays the scripts', and it is not joined again until the agent names that ticket
+ * or runs ship's claim script again.
+ */
+function leaveForTicket(s) {
+  s.notShip = s.joined;
+  s.notShipTicket = s.joinedTicket;
+  const back = s.runs?.agent && s.runs.agent !== s.joined ? s.runs.agent : uuid5("pipexp/session/" + s.sessionId);
+  if (s.runs?.ship === s.joined) delete s.runs.ship;
+  s.runId = back;
+  s.skill = "agent";
+  s.stage = null;
+  s.started = true;
+  s.finished = true;
+  s.explicit = false;
+  s.joined = null;
+  s.joinedTicket = null;
+  s.shipFields = null;
+}
+
+/**
  * A session the repo's ship scripts have claimed reports onto their run, so its ticket has one card that keeps moving
  * (Derek, 29 Sep: cards sat at Take the ticket for hours). Before, the plugin went quiet under a claim, but the scripts
  * report a step only when the agent remembers --step, and never live activity: the card froze, and the plugin's own
@@ -353,6 +375,16 @@ function followShip(s, ctx, at, out, force = false) {
   s.shipOwned = false; // older plugins went quiet under a claim; nothing does now
   const ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
   if (ship === undefined) return;
+  // The run of a claim the agent left for another ticket (leaveForTicket) is not joined again; a new claim's run is.
+  if (s.notShip && ship?.runId === s.notShip) return;
+  s.notShip = null;
+  s.notShipTicket = null;
+  // A session an older plugin left on the ship run under another ticket (onReport before leaveForTicket) moves off.
+  if (onShip(s) && s.ticket && s.joinedTicket && s.ticket !== s.joinedTicket) {
+    leaveForTicket(s);
+    revive(s, ctx, out);
+    return;
+  }
   if (s.joined && (ship?.runId !== s.joined) && !leaveShip(s, ctx, at, out)) {
     // Still this session's, but it now works another ticket it also claimed (CMD-535: NJ-3331's chat stayed on its
     // stale NJ-3256 claim): it moves across, and the old run stays the scripts' to finish. Otherwise it stays put.
@@ -446,7 +478,10 @@ export function onHook(state, input, ctx) {
   const learnedPr = !!known && known !== s.prNumber;
   if (learnedPr) { s.prNumber = known; s.prDropped = false; }
 
-  const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || (name === "PostToolUse" && /claim-run\.sh/.test(commandOf(input.tool_input)));
+  const claimScript = name === "PostToolUse" && /claim-run\.sh/.test(commandOf(input.tool_input));
+  // Ship's claim script run again: the claim left for another ticket is this session's work again.
+  if (claimScript) s.notShip = s.notShipTicket = null;
+  const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || claimScript;
   if (name !== "PrFound") followShip(s, ctx, at, out, edge);
 
   if (name === "SessionStart") {
@@ -570,10 +605,14 @@ export function onReport(state, report, ctx) {
   const out = [];
   const at = ctx.now;
   s.lastSeenAt = at;
+  // Naming the ticket of the claim it left: back on that claim's run.
+  if (s.notShip && report.ticket && report.ticket === s.notShipTicket) s.notShip = s.notShipTicket = null;
   followShip(s, ctx, at, out, true);
+  const leftShip = onShip(s) && !!report.ticket && report.ticket !== s.joinedTicket;
+  if (leftShip) leaveForTicket(s);
   const fields = report.type === "snag.reported" ? snagFields(report.fields) : { ...(report.fields ?? {}) };
   const metadataChanged = s.started && (report.type === "stage" || report.type === "activity") && refresh(s, ctx);
-  const changedTicket = !!report.ticket && report.ticket !== s.ticket;
+  const changedTicket = !!report.ticket && (report.ticket !== s.ticket || leftShip);
   if (report.ticket) {
     if (changedTicket) {
       s.prNumber = null;
