@@ -141,3 +141,19 @@ test("a restart from the board ends this turn like a stop; the flush starts the 
   assert.equal(out.stopReason, RESTART.message);
   assert.equal(steerOutput("codex", "Stop", [RESTART]), "", "at the turn's end it just ends");
 });
+test("a steer waits for the chat it was sent to, never a subagent of it (CMD-535)", async () => {
+  const b = await board([STOP]);
+  saveCredentials({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) });
+  const sid = "01a10328-2afe-7071-a5aa-085c223cd35a";
+  const sub = "/h/.codex/sessions/2026/10/04/rollout-2026-10-04T10-06-03-01a10629-c5d6-7571-accc-f946b86dd995.jsonl";
+  hook({ session_id: sid, cwd: "/repo", hook_event_name: "UserPromptSubmit" }, "codex");
+  await fetchSteers({ url: b.url, key: "pipexp_rk_" + "k".repeat(43) }, loadSession(sid));
+  await b.close();
+  const launcher = new URL("../hooks/pipexp-hook.mjs", import.meta.url).pathname;
+  const fire = (path) =>
+    spawnSync(process.execPath, [launcher, "--runtime", "codex"], { input: JSON.stringify({ session_id: sid, cwd: "/repo", transcript_path: path, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "ls" } }), env: { ...process.env, PIPEXP_NO_FLUSH: "1" }, encoding: "utf8", timeout: 5000 });
+  const child = fire(sub);
+  assert.equal(child.status, 0);
+  assert.equal(child.stdout, "", "the subagent is not stopped in its parent's place");
+  assert.equal(JSON.parse(fire(undefined).stdout).continue, false, "the chat itself still gets its stop");
+});
