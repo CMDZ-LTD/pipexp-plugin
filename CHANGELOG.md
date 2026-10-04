@@ -2,7 +2,7 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
-## Unreleased
+## 0.1.23 (2026-10-04)
 
 - A Codex chat that uses subagents keeps its card moving. Codex sends each subagent's hooks under its parent chat's session, with the subagent's own turn and transcript. Before, a subagent's turn took over the chat's, so the chat's own tool calls were then dropped as late and its card froze while it worked, and a subagent finishing ended the chat's turn (NJ-3454, CMD-535). Now a subagent's tool calls count as the chat's work, its other hooks change nothing, usage keeps reading the chat's own transcript, and board notes and stops wait for the chat itself. A chat a subagent already took over recovers at its next hook.
 
