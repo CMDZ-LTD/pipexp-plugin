@@ -344,7 +344,7 @@ function leaveShip(s, ctx, at, out) {
  */
 function leaveForTicket(s) {
   s.notShip = s.joined;
-  s.notShipTicket = s.joinedTicket;
+  s.notShipTicket = s.joinedTicket ?? s.ticket;
   const back = s.runs?.agent && s.runs.agent !== s.joined ? s.runs.agent : uuid5("pipexp/session/" + s.sessionId);
   if (s.runs?.ship === s.joined) delete s.runs.ship;
   s.runId = back;
@@ -608,7 +608,7 @@ export function onReport(state, report, ctx) {
   // Naming the ticket of the claim it left: back on that claim's run.
   if (s.notShip && report.ticket && report.ticket === s.notShipTicket) s.notShip = s.notShipTicket = null;
   followShip(s, ctx, at, out, true);
-  const leftShip = onShip(s) && !!report.ticket && report.ticket !== s.joinedTicket;
+  const leftShip = onShip(s) && !!report.ticket && report.ticket !== (s.joinedTicket ?? s.ticket);
   if (leftShip) leaveForTicket(s);
   const fields = report.type === "snag.reported" ? snagFields(report.fields) : { ...(report.fields ?? {}) };
   const metadataChanged = s.started && (report.type === "stage" || report.type === "activity") && refresh(s, ctx);
