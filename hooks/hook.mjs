@@ -9,6 +9,7 @@ import { startContext } from "../core/stages.mjs";
 import { notice } from "../core/connect.mjs";
 import { startNotice } from "../core/health.mjs";
 import { hasStop, steerOutput, takeSteers } from "../core/steer.mjs";
+import { subagentPath } from "../core/session.mjs";
 
 let raw = "";
 // This repo's own stages for the agent (CMD-421), from the cached board answer. Told at every SessionStart (a compacted
@@ -32,10 +33,12 @@ process.stdin.on("end", () => {
     const input = adapt(runtime, JSON.parse(raw));
     if (input) {
       hook(input, runtime);
+      // A subagent (CMD-535) is told nothing: notices and steers are for the chat it works for, at that chat's own hooks.
+      const chat = !subagentPath(input.transcript_path, input.session_id);
       // Connecting first; else a board that is down or refusing events, once a day each (CMD-88). The stages go as context.
-      if (input.hook_event_name === "SessionStart") out = noticeOutput(runtime, notice(runtime) || startNotice(), stagesText(input, true));
+      if (chat && input.hook_event_name === "SessionStart") out = noticeOutput(runtime, notice(runtime) || startNotice(), stagesText(input, true));
       // A note or stop someone sent from the board (CMD-80), fetched earlier by the flush: shown once, here.
-      else if (["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop"].includes(input.hook_event_name)) {
+      else if (chat && ["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop"].includes(input.hook_event_name)) {
         const steers = takeSteers(input.session_id);
         const stages = input.hook_event_name === "UserPromptSubmit" ? stagesText(input, false) : "";
         out = steerOutput(runtime, input.hook_event_name, stages ? [{ kind: "note", message: stages }, ...steers] : steers);

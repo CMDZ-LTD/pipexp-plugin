@@ -392,6 +392,14 @@ function followShip(s, ctx, at, out, force = false) {
   if (onShip(s) && ship.step !== null && ship.step > shipStep(s.stage)) enter(s, "ship:S" + ship.step, at, out);
 }
 
+// A Codex transcript is rollout-<time>-<thread id>.jsonl. A subagent is its own thread that sends hooks under its parent's
+// session_id, so a transcript naming another thread is a subagent's (CMD-535: NJ-3454's subagents took over its turn).
+const THREAD_ID = /(?:^|\/)rollout-[^/]*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+export const subagentPath = (path, sessionId) => {
+  const id = typeof path === "string" ? path.match(THREAD_ID)?.[1] : null;
+  return !!id && id.toLowerCase() !== String(sessionId).toLowerCase();
+};
+
 /**
  * One hook. ctx: { now, runtime, machineId, runtimeVersion?, content, probe: { git, threadName, shipClaim } }.
  * Returns { state, events }. Unknown hooks change nothing.
@@ -401,7 +409,17 @@ export function onHook(state, input, ctx) {
   const name = input?.hook_event_name;
   if (!input?.session_id) return { state, events: [] };
   if (name === "PrFound" && !state) return { state, events: [] };
+  // A subagent's hooks belong to its parent's turn: its own turn, transcript, prompt and Stop are not the session's. Its
+  // tool calls show the session working, but only while its own turn does: a subagent still going after the chat's Stop
+  // must not reopen it (its own Stop is ignored too). Its other hooks change nothing.
+  if (subagentPath(input.transcript_path, input.session_id)) {
+    if (!state || state.activity?.state !== "working" || (name !== "PostToolUse" && name !== "PostToolUseFailure")) return { state, events: [] };
+    const { transcript_path, turn_id, ...rest } = input;
+    input = { ...rest, ...(state.turnId && { turn_id: state.turnId }) };
+  }
   const s = state ? structuredClone(state) : newState(input, ctx);
+  // A session a subagent took over before this check (0.1.22) had the parent's own turn filed as past: start clean.
+  if (subagentPath(s.transcriptPath, s.sessionId) && input.transcript_path) s.pastTurns = [];
   // Codex names each turn: turn_id is on UserPromptSubmit, PostToolUse and Stop (its hook input schemas require it). A
   // hook in a turn other than the last one seen starts a new turn even with no prompt: a delegated turn (a message from
   // another thread) fires no UserPromptSubmit. Runtimes that name no turn wait for a prompt, as before (CMD-518).
