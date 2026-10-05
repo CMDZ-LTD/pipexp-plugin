@@ -594,3 +594,23 @@ test("CMD-535: a session 0.1.23 left on a ship run under another ticket moves of
   assert.notEqual(r.state.runId, SHIP_RUN);
   assert.ok(r.events.some((e) => e.type === "run.started" && e.ticket === "NJ-3449"));
 });
+test("CMD-535: a worker thread that runs ship's claim script under its manager's task joins that claim's run", () => {
+  // NJ-3501, 5 Oct: a Ticket Manager chat claimed NJ-3501 and handed the build to a new thread, which heartbeats the claim
+  // with the manager's task id. The worker never joined (the claim names the manager), so NJ-3501 had two cards.
+  const MANAGER = "01a10da3-cbee-7421-a31b-e978dfacd616";
+  const ship = shipRun({ ticket: "NJ-3501", step: 2 });
+  const c = { probe: probe({ shipRun: (_cwd, task) => (task === MANAGER ? ship : null), shipState: () => ({ ticket: "NJ-3501", locked: true, runId: SHIP_RUN, owner: MANAGER, status: "claimed", pr: null }) }) };
+  const mine = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S2", ticket: "NJ-3501" }, ctx(T0 + MIN, c));
+  assert.notEqual(mine.state.runId, SHIP_RUN, "nothing yet ties this thread to the manager's claim");
+  const beat = { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3501 " + MANAGER + " --heartbeat --step 4" } };
+  const r = onHook(mine.state, beat, ctx(T0 + 2 * MIN, c));
+  assert.equal(r.state.runId, SHIP_RUN);
+  assert.ok(r.events.some((e) => e.type === "run.finished" && e.runId === mine.state.runId), "its own NJ-3501 card closes");
+  assert.ok(r.events.some((e) => e.type === "run.started" && e.runId === SHIP_RUN && e.ticket === "NJ-3501"));
+  // Still the claim's: a later turn edge keeps it on the run, and a release by the scripts lets it go.
+  const stop = onHook(r.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 4 * MIN, c));
+  assert.equal(stop.state.runId, SHIP_RUN);
+  // A claim-run.sh that names this session itself changes nothing.
+  const own = onHook(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + SID } }, ctx(T0 + 2 * MIN, c));
+  assert.equal(own.state.shipTask ?? null, null);
+});

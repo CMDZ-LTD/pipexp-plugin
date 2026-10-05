@@ -2,6 +2,10 @@
 
 Every released version of the PipeXP plugin. Tags are `v<version>` on `main`.
 
+## Unreleased
+
+- A thread that builds a ticket for a manager now reports on that ticket's ship card (CMD-535, 5 Oct: a Ticket Manager chat claimed NJ-3501 and handed the build to a new thread, which kept the claim alive with the manager's task id). Before, the claim named only the manager, so the worker never joined the ship run and NJ-3501 had two cards. Now, when a session runs ship's claim script for another task, it acts for that claim: its own card closes, and it reports onto the claim's run until the scripts finish, release or hand it over.
+
 ## 0.1.24 (2026-10-04)
 
 - A chat on a ship run that reports another ticket no longer relabels that ship card (CMD-535, 4 Oct: NJ-3323's chat looked into NJ-3449 and reported NJ-3449 onto NJ-3323's run). It now reports that ticket on its own run, and the claim's run stays with the ship scripts. It goes back onto the ship run when it names the claimed ticket again or runs ship's claim script. A chat already left in this state moves off at its next hook.
