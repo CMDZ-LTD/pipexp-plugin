@@ -335,11 +335,11 @@ function leaveShip(s, ctx, at, out) {
     s.finished = true;
     s.explicit = false;
   }
+  // An adopted claim ends with it: a later claim of the same manager is another worker's.
+  if ((s.joinedTicket ?? s.ticket) === s.shipTaskTicket) s.shipTask = s.shipTaskTicket = null;
   s.joined = null;
   s.joinedTicket = null;
   s.shipFields = null;
-  // An adopted claim ends with it: a later claim of the same manager is another worker's.
-  s.shipTask = s.shipTaskTicket = null;
   return true;
 }
 
@@ -501,6 +501,8 @@ export function onHook(state, input, ctx) {
   // which heartbeats with the manager's task id): this session acts for that claim and joins its run.
   const args = claimScript ? commandOf(input.tool_input).match(CLAIM_ARGS) : null;
   const task = args?.[2]?.toLowerCase();
+  // Its own claim (named by its own id) replaces an adopted one.
+  if (task && task === String(s.sessionId).toLowerCase() && !/--release/.test(commandOf(input.tool_input))) s.shipTask = s.shipTaskTicket = null;
   if (task && task !== String(s.sessionId).toLowerCase()) {
     const ticket = args[1].toUpperCase();
     if (!/--release/.test(commandOf(input.tool_input))) {

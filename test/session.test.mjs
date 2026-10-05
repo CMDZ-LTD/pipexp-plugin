@@ -628,6 +628,9 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   // A release run by the worker for that task ends the adoption too.
   const rel = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + MANAGER + " --release" } }, ctx(T0 + 3 * MIN, c));
   assert.equal(rel.state.shipTask, null);
+  // Its own claim later replaces the adopted one.
+  const ownClaim = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3600 " + SID } }, ctx(T0 + 3 * MIN, c));
+  assert.equal(ownClaim.state.shipTask, null);
   // A claim-run.sh that names this session itself changes nothing.
   const own = onHook(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + SID } }, ctx(T0 + 2 * MIN, c));
   assert.equal(own.state.shipTask ?? null, null);
