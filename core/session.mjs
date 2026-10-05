@@ -307,7 +307,7 @@ const shipOutcome = (status) => {
 const unadopt = (s) => { s.shipTask = s.shipTaskTicket = s.shipTaskRun = null; };
 const ours = (s, owner, ticket) => !!owner && (owner === s.sessionId || (!!s.shipTask && owner === s.shipTask && ticket === s.shipTaskTicket));
 // claim-run.sh <ticket> <task-id> [...]: the ship scripts' claim, heartbeat or release for that task.
-const CLAIM_ARGS = /claim-run\.sh["']?\s+([A-Za-z][A-Za-z0-9]{1,9}-\d{1,6})\s+["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const CLAIM_ARGS = /claim-run\.sh["']?\s+["']?([A-Za-z][A-Za-z0-9]{1,9}-\d{1,6})["']?\s+["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
 /**
  * The ship run is no longer this session's: the scripts finished it (runId cleared), released the claim, or another task
@@ -508,16 +508,19 @@ export function onHook(state, input, ctx) {
   // which heartbeats with the manager's task id): this session acts for that claim and joins its run.
   const args = claimScript ? commandOf(input.tool_input).match(CLAIM_ARGS) : null;
   const task = args?.[2]?.toLowerCase();
-  // Its own claim (named by its own id) replaces an adopted one.
-  if (task && task === String(s.sessionId).toLowerCase() && !/--release/.test(commandOf(input.tool_input)) && !failed(input.tool_response)) unadopt(s);
-  if (task && task !== String(s.sessionId).toLowerCase()) {
+  const release = /--release/.test(commandOf(input.tool_input));
+  // Only a claim, heartbeat or release that worked changes what this session acts for.
+  if (task && !failed(input.tool_response)) {
     const ticket = args[1].toUpperCase();
-    if (!/--release/.test(commandOf(input.tool_input))) {
+    // Its own claim (named by its own id) replaces an adopted one.
+    if (task === String(s.sessionId).toLowerCase()) {
+      if (!release) unadopt(s);
+    } else if (!release) {
       // Another task or ticket is a new adoption; a heartbeat for the same one keeps the run it follows.
       if (s.shipTask !== task || s.shipTaskTicket !== ticket) s.shipTaskRun = null;
       s.shipTask = task;
       s.shipTaskTicket = ticket;
-    } else if (s.shipTask === task && s.shipTaskTicket === ticket && !failed(input.tool_response)) unadopt(s);
+    } else if (s.shipTask === task && s.shipTaskTicket === ticket) unadopt(s);
   }
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || claimScript;
   if (name !== "PrFound") followShip(s, ctx, at, out, edge);

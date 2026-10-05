@@ -650,6 +650,10 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   // Its own claim later replaces the adopted one.
   const ownClaim = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3600 " + SID } }, ctx(T0 + 3 * MIN, c));
   assert.equal(ownClaim.state.shipTask, null);
+  // A refused heartbeat adopts nothing; a quoted command adopts like any other.
+  const fresh = play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state;
+  assert.equal(onHook(fresh, { ...beat, tool_response: { exit_code: 3 } }, ctx(T0 + 2 * MIN, c)).state.shipTask ?? null, null);
+  assert.equal(onHook(fresh, { ...beat, tool_input: { command: "bash claim-run.sh \"NJ-3501\" \"" + MANAGER + "\" --heartbeat" } }, ctx(T0 + 2 * MIN, c)).state.runId, SHIP_RUN);
   // A claim-run.sh that names this session itself changes nothing.
   const own = onHook(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + SID } }, ctx(T0 + 2 * MIN, c));
   assert.equal(own.state.shipTask ?? null, null);
