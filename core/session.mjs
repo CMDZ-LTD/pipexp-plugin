@@ -387,12 +387,14 @@ function followShip(s, ctx, at, out, force = false) {
   if (s.shipTask) {
     const st = ctx.probe.shipState?.(s.cwd, s.shipTaskTicket);
     if (st === undefined) return;
-    // A new run on that ticket is a new claim (the manager re-claimed it for another worker), not this one's.
-    if (st && (!st.locked || (st.owner && st.owner !== s.shipTask) || !st.runId || (s.shipTaskRun && st.runId !== s.shipTaskRun))) unadopt(s);
-    else if (st) {
+    if (st && (!st.locked || (st.owner && st.owner !== s.shipTask))) unadopt(s);
+    else if (st?.runId && (!s.shipTaskRun || st.runId === s.shipTaskRun)) {
       ship = st;
       s.shipTaskRun = st.runId;
     }
+    // Its run cleared, or a new run on that ticket (the manager re-claimed it for another worker): not this one's.
+    // leaveShip finishes the run it followed, as for its own claim, and ends the adoption there.
+    else if (st) ship = null;
   }
   if (ship === undefined) ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
   if (ship === undefined) return;
@@ -515,7 +517,7 @@ export function onHook(state, input, ctx) {
       if (s.shipTask !== task || s.shipTaskTicket !== ticket) s.shipTaskRun = null;
       s.shipTask = task;
       s.shipTaskTicket = ticket;
-    } else if (s.shipTask === task && s.shipTaskTicket === ticket) unadopt(s);
+    } else if (s.shipTask === task && s.shipTaskTicket === ticket && !failed(input.tool_response)) unadopt(s);
   }
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || claimScript;
   if (name !== "PrFound") followShip(s, ctx, at, out, edge);

@@ -635,6 +635,15 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   const reclaimed = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
   assert.ok(!reclaimed.events.some((e) => e.runId === NEW_RUN), "a re-claim is another worker's run");
   claims["NJ-3501"] = saved;
+  // The scripts clear the run while the manager still holds the lock: the run this worker kept alive is finished.
+  claims["NJ-3501"] = { ...saved, runId: null, status: "ready" };
+  const cleared = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
+  assert.ok(cleared.events.some((e) => e.type === "run.finished" && e.runId === SHIP_RUN));
+  assert.equal(cleared.state.shipTask, null);
+  claims["NJ-3501"] = saved;
+  // A failed release keeps the adoption.
+  const kept = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + MANAGER + " --release" }, tool_response: { exit_code: 1 } }, ctx(T0 + 3 * MIN, c));
+  assert.equal(kept.state.shipTask, MANAGER);
   // A failed claim of its own (the manager still holds the lock) keeps the adoption.
   const refused = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3600 " + SID }, tool_response: { exit_code: 3 } }, ctx(T0 + 3 * MIN, c));
   assert.equal(refused.state.shipTask, MANAGER);
