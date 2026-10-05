@@ -628,6 +628,16 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   // A release run by the worker for that task ends the adoption too.
   const rel = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + MANAGER + " --release" } }, ctx(T0 + 3 * MIN, c));
   assert.equal(rel.state.shipTask, null);
+  // The manager re-claims NJ-3501 (a new run) for another worker while this one is idle: it does not join that run.
+  const NEW_RUN = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d";
+  const saved = { ...claims["NJ-3501"], locked: true, owner: MANAGER };
+  claims["NJ-3501"] = { ...saved, runId: NEW_RUN };
+  const reclaimed = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
+  assert.ok(!reclaimed.events.some((e) => e.runId === NEW_RUN), "a re-claim is another worker's run");
+  claims["NJ-3501"] = saved;
+  // A failed claim of its own (the manager still holds the lock) keeps the adoption.
+  const refused = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3600 " + SID }, tool_response: { exit_code: 3 } }, ctx(T0 + 3 * MIN, c));
+  assert.equal(refused.state.shipTask, MANAGER);
   // Its own claim later replaces the adopted one.
   const ownClaim = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3600 " + SID } }, ctx(T0 + 3 * MIN, c));
   assert.equal(ownClaim.state.shipTask, null);
