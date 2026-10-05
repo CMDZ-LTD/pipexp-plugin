@@ -70,3 +70,10 @@ test("a subagent's tool call after the chat's turn ended does not reopen it", ()
   assert.equal(r.state.activity.state, "idle", "the chat waits for its person, whatever a subagent still does");
   assert.deepEqual(r.events, []);
 });
+
+test("a subagent's own ship claim is not adopted by the chat", () => {
+  let s = withSubagent();
+  s = run(s, parent({ ...tool, turn_id: "t1" }, 5 * MIN)).state;
+  const r = run(s, child({ ...tool, tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3501 " + CHILD }, turn_id: "s1" }, 6 * MIN));
+  assert.equal(r.state.shipTask ?? null, null);
+});

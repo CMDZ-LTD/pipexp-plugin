@@ -468,7 +468,8 @@ export function onHook(state, input, ctx) {
   // A subagent's hooks belong to its parent's turn: its own turn, transcript, prompt and Stop are not the session's. Its
   // tool calls show the session working, but only while its own turn does: a subagent still going after the chat's Stop
   // must not reopen it (its own Stop is ignored too). Its other hooks change nothing.
-  if (subagentPath(input.transcript_path, input.session_id)) {
+  const fromSubagent = subagentPath(input.transcript_path, input.session_id);
+  if (fromSubagent) {
     if (!state || state.activity?.state !== "working" || (name !== "PostToolUse" && name !== "PostToolUseFailure")) return { state, events: [] };
     const { transcript_path, turn_id, ...rest } = input;
     input = { ...rest, ...(state.turnId && { turn_id: state.turnId }) };
@@ -511,7 +512,8 @@ export function onHook(state, input, ctx) {
   const task = args?.[2]?.toLowerCase();
   const release = /--release/.test(commandOf(input.tool_input));
   // Only a claim, heartbeat or release that worked changes what this session acts for.
-  if (task && !failed(input.tool_response)) {
+  // A subagent's claims are its own thread's, never something the chat acts for.
+  if (task && !fromSubagent && !failed(input.tool_response)) {
     const ticket = args[1].toUpperCase();
     // Its own claim (named by its own id) replaces an adopted one.
     if (task === String(s.sessionId).toLowerCase()) {
