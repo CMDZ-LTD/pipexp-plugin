@@ -303,6 +303,12 @@ const shipOutcome = (status) => {
   return st.includes("blocked") ? "blocked" : st === "ready" || st === "technically_green" || st.includes("human") ? "ready" : st === "merged" ? "merged" : "abandoned";
 };
 
+/** A ship claim's owner is this session, or, for the one ticket it adopted, the task it acts for (shipTask). */
+const unadopt = (s) => { s.shipTask = s.shipTaskTicket = s.shipTaskRun = null; };
+const ours = (s, owner, ticket) => !!owner && (owner === s.sessionId || (!!s.shipTask && owner === s.shipTask && ticket === s.shipTaskTicket));
+// claim-run.sh <ticket> <task-id> [...]: the ship scripts' claim, heartbeat or release for that task.
+const CLAIM_ARGS = /claim-run\.sh["']?\s+["']?([A-Za-z][A-Za-z0-9]{1,9}-\d{1,6})["']?\s+["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
 /**
  * The ship run is no longer this session's: the scripts finished it (runId cleared), released the claim, or another task
  * took it over. Finished or released, it is finished again with the outcome ship's own finish reports, so a run the
@@ -312,7 +318,7 @@ const shipOutcome = (status) => {
 function leaveShip(s, ctx, at, out) {
   const st = ctx.probe.shipState?.(s.cwd, s.joinedTicket ?? s.ticket);
   if (st === undefined) return false;
-  const takenOver = !!st?.owner && st.owner !== s.sessionId;
+  const takenOver = !!st?.owner && !ours(s, st.owner, st.ticket);
   // Leave only on proof: the scripts cleared or replaced the run, released the claim, or another task holds it. A read
   // caught mid-heartbeat (an empty owner.json, a state.json being written) keeps the session on the run.
   if (!st || !(takenOver || !st.locked || st.runId !== s.joined)) return false;
@@ -330,6 +336,9 @@ function leaveShip(s, ctx, at, out) {
     s.finished = true;
     s.explicit = false;
   }
+  // An adopted claim ends when it is released or another task holds it; a run the scripts cleared or replaced keeps it,
+  // pinned to the run left, so only this session's own next claim-run joins a new one.
+  if ((s.joinedTicket ?? s.ticket) === s.shipTaskTicket && (takenOver || !st?.locked)) unadopt(s);
   s.joined = null;
   s.joinedTicket = null;
   s.shipFields = null;
@@ -373,7 +382,22 @@ function followShip(s, ctx, at, out, force = false) {
   if (!force && at - (s.shipCheckedAt ?? 0) < SHIP_CHECK_MS) return;
   s.shipCheckedAt = at;
   s.shipOwned = false; // older plugins went quiet under a claim; nothing does now
-  const ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
+  // The one claim this session adopted through claim-run.sh (a manager's ticket it builds), else its own. The adoption
+  // ends on proof the claim is over: released, held by another task, or no run.
+  let ship;
+  if (s.shipTask) {
+    const st = ctx.probe.shipState?.(s.cwd, s.shipTaskTicket);
+    if (st === undefined) return;
+    if (st && (!st.locked || (st.owner && st.owner !== s.shipTask))) unadopt(s);
+    else if (st?.runId && (!s.shipTaskRun || st.runId === s.shipTaskRun)) {
+      ship = st;
+      s.shipTaskRun = st.runId;
+    }
+    // Its run cleared, or a new run on that ticket (the manager re-claimed it for another worker): not this one's.
+    // leaveShip finishes the run it followed, as for its own claim, and ends the adoption there.
+    else if (st) ship = null;
+  }
+  if (ship === undefined) ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
   if (ship === undefined) return;
   // The run of a claim the agent left for another ticket (leaveForTicket) is not joined again; a new claim's run is.
   if (s.notShip && ship?.runId === s.notShip) return;
@@ -389,7 +413,7 @@ function followShip(s, ctx, at, out, force = false) {
     // Still this session's, but it now works another ticket it also claimed (CMD-535: NJ-3331's chat stayed on its
     // stale NJ-3256 claim): it moves across, and the old run stays the scripts' to finish. Otherwise it stays put.
     // Only on a clean read that the old claim is still ours: an owner.json caught mid-rewrite proves nothing.
-    if (!ship?.runId || ship.ticket === s.joinedTicket || ctx.probe.shipState?.(s.cwd, s.joinedTicket)?.owner !== s.sessionId) return;
+    if (!ship?.runId || ship.ticket === s.joinedTicket || !ours(s, ctx.probe.shipState?.(s.cwd, s.joinedTicket)?.owner, s.joinedTicket)) return;
     if (s.runId === s.joined) s.finished = true;
     if (s.runs?.ship === s.joined) delete s.runs.ship;
     s.joined = null;
@@ -444,7 +468,8 @@ export function onHook(state, input, ctx) {
   // A subagent's hooks belong to its parent's turn: its own turn, transcript, prompt and Stop are not the session's. Its
   // tool calls show the session working, but only while its own turn does: a subagent still going after the chat's Stop
   // must not reopen it (its own Stop is ignored too). Its other hooks change nothing.
-  if (subagentPath(input.transcript_path, input.session_id)) {
+  const fromSubagent = subagentPath(input.transcript_path, input.session_id);
+  if (fromSubagent) {
     if (!state || state.activity?.state !== "working" || (name !== "PostToolUse" && name !== "PostToolUseFailure")) return { state, events: [] };
     const { transcript_path, turn_id, ...rest } = input;
     input = { ...rest, ...(state.turnId && { turn_id: state.turnId }) };
@@ -481,6 +506,25 @@ export function onHook(state, input, ctx) {
   const claimScript = name === "PostToolUse" && /claim-run\.sh/.test(commandOf(input.tool_input));
   // Ship's claim script run again: the claim left for another ticket is this session's work again.
   if (claimScript) s.notShip = s.notShipTicket = null;
+  // Run for another task's claim (CMD-535, NJ-3501: a manager claimed the ticket, then handed the build to this thread,
+  // which heartbeats with the manager's task id): this session acts for that claim and joins its run.
+  const args = claimScript ? commandOf(input.tool_input).match(CLAIM_ARGS) : null;
+  const task = args?.[2]?.toLowerCase();
+  const release = /--release/.test(commandOf(input.tool_input));
+  // Only a claim, heartbeat or release that worked changes what this session acts for.
+  // A subagent's claims are its own thread's, never something the chat acts for.
+  if (task && !fromSubagent && !failed(input.tool_response)) {
+    const ticket = args[1].toUpperCase();
+    // Its own claim (named by its own id) replaces an adopted one.
+    if (task === String(s.sessionId).toLowerCase()) {
+      if (!release) unadopt(s);
+    } else if (!release) {
+      // A claim-run that worked is proof the claim's run now is this session's: follow whichever run is live.
+      s.shipTaskRun = null;
+      s.shipTask = task;
+      s.shipTaskTicket = ticket;
+    } else if (s.shipTask === task && s.shipTaskTicket === ticket) unadopt(s);
+  }
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || claimScript;
   if (name !== "PrFound") followShip(s, ctx, at, out, edge);
 
