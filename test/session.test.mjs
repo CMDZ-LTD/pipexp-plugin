@@ -599,7 +599,13 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   // with the manager's task id. The worker never joined (the claim names the manager), so NJ-3501 had two cards.
   const MANAGER = "01a10da3-cbee-7421-a31b-e978dfacd616";
   const ship = shipRun({ ticket: "NJ-3501", step: 2 });
-  const c = { probe: probe({ shipRun: (_cwd, task) => (task === MANAGER ? ship : null), shipState: () => ({ ticket: "NJ-3501", locked: true, runId: SHIP_RUN, owner: MANAGER, status: "claimed", pr: null }) }) };
+  const OTHER_RUN = "5e2f0c1a-2b3c-4d5e-8f60-718293a4b5c6";
+  // The manager holds two claims; the worker's command names NJ-3501.
+  const claims = {
+    "NJ-3501": { ticket: "NJ-3501", locked: true, runId: SHIP_RUN, owner: MANAGER, status: "claimed", pr: null, fields: ship.fields, step: 2 },
+    "NJ-3500": { ticket: "NJ-3500", locked: true, runId: OTHER_RUN, owner: MANAGER, status: "claimed", pr: null, fields: null, step: 1 },
+  };
+  const c = { probe: probe({ shipRun: () => null, shipState: (_cwd, t) => claims[t] ?? null }) };
   const mine = onReport(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { type: "stage", stage: "ship:S2", ticket: "NJ-3501" }, ctx(T0 + MIN, c));
   assert.notEqual(mine.state.runId, SHIP_RUN, "nothing yet ties this thread to the manager's claim");
   const beat = { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "bash .claude/skills/ship/scripts/claim-run.sh NJ-3501 " + MANAGER + " --heartbeat --step 4" } };
@@ -610,6 +616,18 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   // Still the claim's: a later turn edge keeps it on the run, and a release by the scripts lets it go.
   const stop = onHook(r.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 4 * MIN, c));
   assert.equal(stop.state.runId, SHIP_RUN);
+  assert.equal(stop.state.joinedTicket, "NJ-3501", "the ticket the command named, never the manager's other claim");
+  // The scripts release NJ-3501, then the same manager claims NJ-3502 for another worker: this one leaves and stays off.
+  claims["NJ-3501"] = { ...claims["NJ-3501"], locked: false, owner: null };
+  claims["NJ-3502"] = { ticket: "NJ-3502", locked: true, runId: OTHER_RUN, owner: MANAGER, status: "claimed", pr: null, fields: null, step: 1 };
+  const left = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 6 * MIN, c));
+  assert.notEqual(left.state.runId, SHIP_RUN);
+  assert.equal(left.state.shipTask, null);
+  const later = onHook(left.state, { ...base, hook_event_name: "Stop" }, ctx(T0 + 8 * MIN, c));
+  assert.ok(!later.events.some((e) => e.runId === OTHER_RUN), "another ticket of the same manager is not this worker's");
+  // A release run by the worker for that task ends the adoption too.
+  const rel = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + MANAGER + " --release" } }, ctx(T0 + 3 * MIN, c));
+  assert.equal(rel.state.shipTask, null);
   // A claim-run.sh that names this session itself changes nothing.
   const own = onHook(play([[0, { hook_event_name: "UserPromptSubmit" }]], c).state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + SID } }, ctx(T0 + 2 * MIN, c));
   assert.equal(own.state.shipTask ?? null, null);

@@ -303,8 +303,8 @@ const shipOutcome = (status) => {
   return st.includes("blocked") ? "blocked" : st === "ready" || st === "technically_green" || st.includes("human") ? "ready" : st === "merged" ? "merged" : "abandoned";
 };
 
-/** A ship claim's owner is this session, or the task it acts for (shipTask). */
-const ours = (s, owner) => !!owner && (owner === s.sessionId || owner === s.shipTask);
+/** A ship claim's owner is this session, or, for the one ticket it adopted, the task it acts for (shipTask). */
+const ours = (s, owner, ticket) => !!owner && (owner === s.sessionId || (!!s.shipTask && owner === s.shipTask && ticket === s.shipTaskTicket));
 // claim-run.sh <ticket> <task-id> [...]: the ship scripts' claim, heartbeat or release for that task.
 const CLAIM_ARGS = /claim-run\.sh["']?\s+([A-Za-z][A-Za-z0-9]{1,9}-\d{1,6})\s+["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
@@ -317,7 +317,7 @@ const CLAIM_ARGS = /claim-run\.sh["']?\s+([A-Za-z][A-Za-z0-9]{1,9}-\d{1,6})\s+["
 function leaveShip(s, ctx, at, out) {
   const st = ctx.probe.shipState?.(s.cwd, s.joinedTicket ?? s.ticket);
   if (st === undefined) return false;
-  const takenOver = !!st?.owner && !ours(s, st.owner);
+  const takenOver = !!st?.owner && !ours(s, st.owner, st.ticket);
   // Leave only on proof: the scripts cleared or replaced the run, released the claim, or another task holds it. A read
   // caught mid-heartbeat (an empty owner.json, a state.json being written) keeps the session on the run.
   if (!st || !(takenOver || !st.locked || st.runId !== s.joined)) return false;
@@ -338,6 +338,8 @@ function leaveShip(s, ctx, at, out) {
   s.joined = null;
   s.joinedTicket = null;
   s.shipFields = null;
+  // An adopted claim ends with it: a later claim of the same manager is another worker's.
+  s.shipTask = s.shipTaskTicket = null;
   return true;
 }
 
@@ -378,9 +380,16 @@ function followShip(s, ctx, at, out, force = false) {
   if (!force && at - (s.shipCheckedAt ?? 0) < SHIP_CHECK_MS) return;
   s.shipCheckedAt = at;
   s.shipOwned = false; // older plugins went quiet under a claim; nothing does now
-  // The claim of the task this session acts for (a manager's, adopted through claim-run.sh), else its own.
-  const acting = s.shipTask ? ctx.probe.shipRun?.(s.cwd, s.shipTask) : null;
-  const ship = acting?.runId ? acting : ctx.probe.shipRun?.(s.cwd, s.sessionId);
+  // The one claim this session adopted through claim-run.sh (a manager's ticket it builds), else its own. The adoption
+  // ends on proof the claim is over: released, held by another task, or no run.
+  let ship;
+  if (s.shipTask) {
+    const st = ctx.probe.shipState?.(s.cwd, s.shipTaskTicket);
+    if (st === undefined) return;
+    if (st && (!st.locked || (st.owner && st.owner !== s.shipTask) || !st.runId)) s.shipTask = s.shipTaskTicket = null;
+    else if (st) ship = st;
+  }
+  if (ship === undefined) ship = ctx.probe.shipRun?.(s.cwd, s.sessionId);
   if (ship === undefined) return;
   // The run of a claim the agent left for another ticket (leaveForTicket) is not joined again; a new claim's run is.
   if (s.notShip && ship?.runId === s.notShip) return;
@@ -396,7 +405,7 @@ function followShip(s, ctx, at, out, force = false) {
     // Still this session's, but it now works another ticket it also claimed (CMD-535: NJ-3331's chat stayed on its
     // stale NJ-3256 claim): it moves across, and the old run stays the scripts' to finish. Otherwise it stays put.
     // Only on a clean read that the old claim is still ours: an owner.json caught mid-rewrite proves nothing.
-    if (!ship?.runId || ship.ticket === s.joinedTicket || !ours(s, ctx.probe.shipState?.(s.cwd, s.joinedTicket)?.owner)) return;
+    if (!ship?.runId || ship.ticket === s.joinedTicket || !ours(s, ctx.probe.shipState?.(s.cwd, s.joinedTicket)?.owner, s.joinedTicket)) return;
     if (s.runId === s.joined) s.finished = true;
     if (s.runs?.ship === s.joined) delete s.runs.ship;
     s.joined = null;
@@ -490,8 +499,15 @@ export function onHook(state, input, ctx) {
   if (claimScript) s.notShip = s.notShipTicket = null;
   // Run for another task's claim (CMD-535, NJ-3501: a manager claimed the ticket, then handed the build to this thread,
   // which heartbeats with the manager's task id): this session acts for that claim and joins its run.
-  const task = claimScript ? commandOf(input.tool_input).match(CLAIM_ARGS)?.[2]?.toLowerCase() : null;
-  if (task && task !== String(s.sessionId).toLowerCase() && !/--release/.test(commandOf(input.tool_input))) s.shipTask = task;
+  const args = claimScript ? commandOf(input.tool_input).match(CLAIM_ARGS) : null;
+  const task = args?.[2]?.toLowerCase();
+  if (task && task !== String(s.sessionId).toLowerCase()) {
+    const ticket = args[1].toUpperCase();
+    if (!/--release/.test(commandOf(input.tool_input))) {
+      s.shipTask = task;
+      s.shipTaskTicket = ticket;
+    } else if (s.shipTask === task && s.shipTaskTicket === ticket) s.shipTask = s.shipTaskTicket = null;
+  }
   const edge = name === "SessionStart" || name === "UserPromptSubmit" || name === "Stop" || claimScript;
   if (name !== "PrFound") followShip(s, ctx, at, out, edge);
 
