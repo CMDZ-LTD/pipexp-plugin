@@ -336,8 +336,9 @@ function leaveShip(s, ctx, at, out) {
     s.finished = true;
     s.explicit = false;
   }
-  // An adopted claim ends with it: a later claim of the same manager is another worker's.
-  if ((s.joinedTicket ?? s.ticket) === s.shipTaskTicket) unadopt(s);
+  // An adopted claim ends when it is released or another task holds it; a run the scripts cleared or replaced keeps it,
+  // pinned to the run left, so only this session's own next claim-run joins a new one.
+  if ((s.joinedTicket ?? s.ticket) === s.shipTaskTicket && (takenOver || !st?.locked)) unadopt(s);
   s.joined = null;
   s.joinedTicket = null;
   s.shipFields = null;
@@ -516,8 +517,8 @@ export function onHook(state, input, ctx) {
     if (task === String(s.sessionId).toLowerCase()) {
       if (!release) unadopt(s);
     } else if (!release) {
-      // Another task or ticket is a new adoption; a heartbeat for the same one keeps the run it follows.
-      if (s.shipTask !== task || s.shipTaskTicket !== ticket) s.shipTaskRun = null;
+      // A claim-run that worked is proof the claim's run now is this session's: follow whichever run is live.
+      s.shipTaskRun = null;
       s.shipTask = task;
       s.shipTaskTicket = ticket;
     } else if (s.shipTask === task && s.shipTaskTicket === ticket) unadopt(s);

@@ -639,7 +639,11 @@ test("CMD-535: a worker thread that runs ship's claim script under its manager's
   claims["NJ-3501"] = { ...saved, runId: null, status: "ready" };
   const cleared = onHook(stop.state, { ...base, hook_event_name: "UserPromptSubmit" }, ctx(T0 + 5 * MIN, c));
   assert.ok(cleared.events.some((e) => e.type === "run.finished" && e.runId === SHIP_RUN));
-  assert.equal(cleared.state.shipTask, null);
+  assert.notEqual(cleared.state.runId, SHIP_RUN);
+  // The scripts start a new run and this worker heartbeats it: it follows the live run.
+  claims["NJ-3501"] = { ...saved, runId: NEW_RUN };
+  const rejoined = onHook(cleared.state, beat, ctx(T0 + 6 * MIN, c));
+  assert.equal(rejoined.state.runId, NEW_RUN);
   claims["NJ-3501"] = saved;
   // A failed release keeps the adoption.
   const kept = onHook(r.state, { ...beat, tool_input: { command: "bash claim-run.sh NJ-3501 " + MANAGER + " --release" }, tool_response: { exit_code: 1 } }, ctx(T0 + 3 * MIN, c));
